@@ -6,6 +6,8 @@ import (
     "fmt"
     "flag"
     "os"
+	"encoding/json"
+	"net/http"
 )
 const (
     NUMBER_1 = 1
@@ -66,7 +68,7 @@ func parseMain() {
     log.Infof("Successfully read %s!", filename)
 }
 
-func main() {
+func fileExample() {
     _filename := flag.String("filename", "main.go", "path to file to be parsed")
     flag.Parse()
     filename := *_filename
@@ -82,4 +84,53 @@ func main() {
         os.Exit(1)
     }
     log.Printf("%s", expr.Eval())
+}
+
+type ExprRequest struct {
+	Expr string `json:"expr"`
+}
+
+type ExprResponse struct {
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+func exprHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ExprRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, ExprResponse{Error: "invalid JSON"})
+		return
+	}
+
+	if req.Expr == "" {
+		writeJSON(w, ExprResponse{Error: "expr is required"})
+		return
+	}
+    
+    l := LexerInit()
+    l.AddNamedExpr("post-request", req.Expr)
+    expr, err := l.ParseExpr()
+    if err != nil {
+		writeJSON(w, ExprResponse{Error: err.Error()})
+		return
+    }
+	writeJSON(w, ExprResponse{Result: expr.Eval()})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func main() {
+	http.HandleFunc("/api/expr", exprHandler)
+
+    const PORT = ":8000"
+	log.Infof("listening on %s", PORT)
+	http.ListenAndServe(PORT, nil)
 }

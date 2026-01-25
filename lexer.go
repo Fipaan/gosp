@@ -139,6 +139,18 @@ func (l *Lexer) AddSourceFile(src string) error {
     }
     return nil
 }
+func (l *Lexer) AddNamedExpr(name, value string) {
+    l.Sources = append(l.Sources, Source{
+        Name:  name,
+        Chars: []rune(value),
+    })
+    if l.Cursor.SourceIndex == -1 {
+        l.Cursor.SourceIndex = 0
+        l.Cursor.Source      = name
+        l.Cursor.Line        = 1
+        l.Cursor.Column      = 1
+    }
+}
 func (loc *Location) peekChar(l *Lexer) (ch rune, ok bool) {
     if l.Cursor.SourceIndex == -1 { return }
     if l.Cursor.SourceIndex >= len(l.Sources) { return }
