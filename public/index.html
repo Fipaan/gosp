@@ -21,12 +21,33 @@
       font-size: 16px;
       cursor: pointer;
     }
-    pre {
+    #output {
       background: #222;
       color: #0f0;
       padding: 15px;
       margin-top: 20px;
       white-space: pre-wrap;
+    }
+    #history {
+      margin-top: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .history-item {
+      background: #333;
+      color: #fff;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    .history-command {
+      color: #00f;
+    }
+    .history-result {
+      color: #0f0;
+      margin-top: 5px;
     }
   </style>
 </head>
@@ -42,6 +63,9 @@
 <button id="runBtn">Run</button>
 
 <pre id="output">Output will appear here...</pre>
+
+<h2>History</h2>
+<div id="history">No commands yet.</div>
 
 <script src="script.js"></script>
 </body>
