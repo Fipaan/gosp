@@ -1,4 +1,4 @@
-package main
+package lexer
 
 import (
     "github.com/Fipaan/gosp/log"
@@ -28,13 +28,14 @@ func IsId(ch rune) bool {
 }
 
 type Location struct {
-    Source      string
-    Line        int
-    Column      int
+	Source string `json:"source"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
     
-    SourceIndex int
-    Raw         int
+    SourceIndex int `json:"-"`
+    Raw         int `json:"-"`
 }
+
 func (l *Location) Loc() string {
     return fmt.Sprintf("%s:%d:%d", l.Source, l.Line, l.Column)
 }
@@ -111,11 +112,15 @@ type Lexer struct {
     Cursor   Location
     TokenLoc Location
     Type     TokenType
+    
     Str      string
     Int      int64
     Double   float64
     Char     rune
+    
     Err      error
+    ErrLoc   Location
+    
     NextFile bool
 }
 func LexerInit() (l Lexer) {
@@ -151,14 +156,14 @@ func (l *Lexer) AddNamedExpr(name, value string) {
         l.Cursor.Column      = 1
     }
 }
-func (loc *Location) peekChar(l *Lexer) (ch rune, ok bool) {
+func (loc *Location) PeekChar(l *Lexer) (ch rune, ok bool) {
     if l.Cursor.SourceIndex == -1 { return }
     if l.Cursor.SourceIndex >= len(l.Sources) { return }
     Chars := l.Sources[loc.SourceIndex].Chars
     if l.Cursor.Raw >= len(Chars) { return }
     return Chars[loc.Raw], true
 }
-func (loc *Location) skipChar(l *Lexer, ch rune) (rest bool) {
+func (loc *Location) SkipChar(l *Lexer, ch rune) (rest bool) {
     Chars := l.Sources[loc.SourceIndex].Chars
     if loc.Raw < len(Chars) {
         if ch == '\n' {
@@ -180,40 +185,44 @@ func (loc *Location) skipChar(l *Lexer, ch rune) (rest bool) {
     l.NextFile = false
     return true
 }
-func (loc *Location) getChar(l *Lexer) (ch rune, ok bool) {
-    ch, ok = loc.peekChar(l)
+func (loc *Location) GetChar(l *Lexer) (ch rune, ok bool) {
+    ch, ok = loc.PeekChar(l)
     if !ok { return }
-    loc.skipChar(l, ch)
+    loc.SkipChar(l, ch)
     return
 }
 func (l *Lexer) SkipSpaces() (ok bool) {
     for {
-        ch, ok := l.Cursor.peekChar(l)
+        ch, ok := l.Cursor.PeekChar(l)
         if !ok { break }
         if !unicode.IsSpace(ch) { return true }
-        l.Cursor.skipChar(l, ch)
+        l.Cursor.SkipChar(l, ch)
     }
     return
 }
-func (l *Lexer) setChToken(ch rune, kind TokenType) {
-    l.Cursor.skipChar(l, ch)
+func (l *Lexer) SetChToken(ch rune, kind TokenType) {
+    l.Cursor.SkipChar(l, ch)
     l.Type = kind
     l.Char = ch
 }
-func (l *Lexer) unknownToken(ch rune) {
-    l.Cursor.skipChar(l, ch)
-    l.Type  = TokenError
-    Ch, _  := log.CharDesc(ch, false)
-    l.Err   = fmt.Errorf("%s does not start any known token", Ch)
+func (l *Lexer) SetErr(err error) {
+    l.Type = TokenError
+    l.Err    = err
+    l.ErrLoc = l.TokenLoc
 }
-func (l *Lexer) parseNumber() bool {
+func (l *Lexer) UnknownToken(ch rune) {
+    l.Cursor.SkipChar(l, ch)
+    Ch, _  := log.CharDesc(ch, false)
+    l.SetErr(fmt.Errorf("%s does not start any known token", Ch))
+}
+func (l *Lexer) ParseNumber() bool {
     saved := l.Cursor
     var beforeFloat []rune
     var afterFloat []rune
     var err error
     numStr := ""
     
-    ch, ok := l.Cursor.getChar(l)
+    ch, ok := l.Cursor.GetChar(l)
     isNegative := ch == '-'
     isFloating := ch == '.'
     
@@ -222,7 +231,7 @@ func (l *Lexer) parseNumber() bool {
         beforeFloat = append(beforeFloat, ch)
     } else if !isNegative && !isFloating { goto restore }
     for {
-        ch, ok = l.Cursor.peekChar(l)
+        ch, ok = l.Cursor.PeekChar(l)
         if !ok { break }
         if ch == '.' {
             if isFloating { goto restore }
@@ -235,7 +244,7 @@ func (l *Lexer) parseNumber() bool {
                 beforeFloat = append(beforeFloat, ch)
             }
         }
-        l.Cursor.skipChar(l, ch)
+        l.Cursor.SkipChar(l, ch)
         if l.NextFile { break }
     }
     if isFloating && len(afterFloat) == 0 && len(beforeFloat) == 0 {
@@ -263,26 +272,25 @@ func (l *Lexer) parseNumber() bool {
         l.Int, err = strconv.ParseInt(numStr, 10, 64)
     }
     if err != nil {
-        l.Type = TokenError
-        l.Err = err
+        l.SetErr(err)
     }
     return true
 restore:
     l.Cursor = saved
     return false
 }
-func (l *Lexer) parseId() bool {
+func (l *Lexer) ParseId() bool {
     saved := l.Cursor
-    ch, ok := l.Cursor.peekChar(l)
+    ch, ok := l.Cursor.PeekChar(l)
     var chars []rune
     if !ok { goto restore }
     if !IsIdFirst(ch) { goto restore }
     for {
-        ch, ok := l.Cursor.peekChar(l)
+        ch, ok := l.Cursor.PeekChar(l)
         if !ok { break }
         if !IsId(ch) { break }
         chars = append(chars, ch)
-        l.Cursor.skipChar(l, ch)
+        l.Cursor.SkipChar(l, ch)
         if l.NextFile { break }
     }
     if len(chars) == 0 { goto restore }
@@ -300,50 +308,47 @@ func (l *Lexer) ParseToken() bool {
     ok := l.SkipSpaces()
     if !ok { return false }
     l.TokenLoc = l.Cursor
-    ch, _ := l.Cursor.peekChar(l)
+    ch, _ := l.Cursor.PeekChar(l)
     switch ch {
     case '(':
-        l.setChToken(ch, TokenOParen)
+        l.SetChToken(ch, TokenOParen)
         return true
     case ')':
-        l.setChToken(ch, TokenCParen)
+        l.SetChToken(ch, TokenCParen)
         return true
     case '{':
-        l.setChToken(ch, TokenOCurly)
+        l.SetChToken(ch, TokenOCurly)
         return true
     case '}':
-        l.setChToken(ch, TokenCCurly)
+        l.SetChToken(ch, TokenCCurly)
         return true
     case '[':
-        l.setChToken(ch, TokenOBracket)
+        l.SetChToken(ch, TokenOBracket)
         return true
     case ']':
-        l.setChToken(ch, TokenCBracket)
+        l.SetChToken(ch, TokenCBracket)
         return true
     case ',':
-        l.setChToken(ch, TokenComma)
+        l.SetChToken(ch, TokenComma)
         return true
     case '"':
-        l.Cursor.skipChar(l, ch)
+        l.Cursor.SkipChar(l, ch)
         if l.NextFile {
-            l.Type  = TokenError
-            l.Err   = fmt.Errorf("unclosed string literal")
+            l.SetErr(fmt.Errorf("unclosed string literal"))
             return true
         }
         var chars []rune
         escaping := false
         for {
-            ch, ok = l.Cursor.peekChar(l)
+            ch, ok = l.Cursor.PeekChar(l)
             if !ok {
-                l.Type  = TokenError
-                l.Err   = fmt.Errorf("unclosed string literal")
+                l.SetErr(fmt.Errorf("unclosed string literal"))
                 return true
             }
-            l.Cursor.skipChar(l, ch)
+            l.Cursor.SkipChar(l, ch)
             if !escaping && ch == '"' { break }
             if ch == '\n' || l.NextFile {
-                l.Type  = TokenError
-                l.Err   = fmt.Errorf("unclosed string literal")
+                l.SetErr(fmt.Errorf("unclosed string literal"))
                 return true
             }
             if escaping {
@@ -355,7 +360,7 @@ func (l *Lexer) ParseToken() bool {
                 default:
                     l.Type  = TokenError
                     Ch, _  := log.CharDesc(ch, false)
-                    l.Err   = fmt.Errorf("%s unknown escape character", Ch)
+                    l.SetErr(fmt.Errorf("%s unknown escape character", Ch))
                     return true
                 }
                 escaping = false
@@ -369,9 +374,9 @@ func (l *Lexer) ParseToken() bool {
         l.Str = string(chars)
         return true
     default:
-        if l.parseNumber() { return true }
-        if l.parseId()     { return true }
-        l.unknownToken(ch)
+        if l.ParseNumber() { return true }
+        if l.ParseId()     { return true }
+        l.UnknownToken(ch)
         return true
     }
     return false

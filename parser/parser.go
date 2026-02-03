@@ -1,38 +1,50 @@
-package main
+package parser
 
 import (
     "github.com/Fipaan/gosp/log"
+    "github.com/Fipaan/gosp/lexer"
     "fmt"
     "strconv"
 )
 
-func (l *Lexer) PeekToken() (Type TokenType, ok bool) {
-    saved := l.Cursor
-    ok = l.ParseToken()
+type Parser struct {
+    lexer.Lexer
+}
+
+func ParserInit() Parser {
+    return Parser{lexer.LexerInit()}
+}
+
+func (p *Parser) PeekToken() (Type lexer.TokenType, ok bool) {
+    saved := p.Cursor
+    ok = p.ParseToken()
     if ok {
-        Type = l.Type
+        Type = p.Type
     }
-    l.Cursor = saved
+    p.Cursor = saved
     return
 }
-func (l *Lexer) Expect(Type TokenType) error {
-    if l.Type != Type {
-        return fmt.Errorf("%s: Expected %s, got %s", l.Loc(), Type.Str(), l.Type.Str())
+func (p *Parser) Expect(Type lexer.TokenType) bool {
+    if p.Type != Type {
+        p.SetErr(fmt.Errorf("Expected %s, got %s", Type.Str(), p.Type.Str()))
+        return false
     }
-    return nil
+    return true
 }
-func (l *Lexer) ParseAndExpect(Type TokenType) error {
-    if !l.ParseToken() {
-        return fmt.Errorf("%s: Expected %s, got nothing", l.Loc(), Type.Str())
+func (p *Parser) ParseAndExpect(Type lexer.TokenType) bool {
+    if !p.ParseToken() {
+        p.SetErr(fmt.Errorf("Expected %s, got nothing", Type.Str()))
+        return false
     }
-    return l.Expect(Type)
+    return p.Expect(Type)
 }
-func (l *Lexer) ExpectEOF() (err error) {
-    if l.NextFile { return }
-    if l.SkipSpaces() {
-        err = fmt.Errorf("%s: Expected EOF", l.Loc())
+func (p *Parser) ExpectEOF() bool {
+    if p.NextFile { return true }
+    if p.SkipSpaces() {
+        p.SetErr(fmt.Errorf("%s: Expected EOF", p.Loc()))
+        return false
     }
-    return
+    return true
 }
 
 type ExprType uint8
@@ -110,28 +122,28 @@ var FUNC_TABLE = []Function {
     },
 }
 
-func (l *Lexer) ParseExpr() (expr Expr, err error) {
-    saved := l.Cursor
-    ok := l.ParseToken()
+func (p *Parser) ParseExpr() (expr Expr, ok bool) {
+    saved := p.Cursor
+    ok = p.ParseToken()
     var id string
     var _func *Function = nil
-    var t TokenType
+    var t lexer.TokenType
     var _expr Expr
     if !ok {
-        err = fmt.Errorf("%s: no token found", l.Loc())
+        p.SetErr(fmt.Errorf("no token found"))
         goto restore
     }
-    switch l.Type {
-        case TokenId:     return Expr{Type: ExprId,     Id:     l.Str},    nil
-        case TokenStr:    return Expr{Type: ExprStr,    Str:    l.Str},    nil
-        case TokenInt:    return Expr{Type: ExprInt,    Int:    l.Int},    nil
-        case TokenDouble: return Expr{Type: ExprDouble, Double: l.Double}, nil
+    switch p.Type {
+        case lexer.TokenId:     return Expr{Type: ExprId,     Id:     p.Str},    true
+        case lexer.TokenStr:    return Expr{Type: ExprStr,    Str:    p.Str},    true
+        case lexer.TokenInt:    return Expr{Type: ExprInt,    Int:    p.Int},    true
+        case lexer.TokenDouble: return Expr{Type: ExprDouble, Double: p.Double}, true
     }
-    err = l.Expect(TokenOParen)
-    if err != nil { goto restore }
-    err = l.ParseAndExpect(TokenId)
-    if err != nil { goto restore }
-    id = l.Str
+    ok = p.Expect(lexer.TokenOParen)
+    if !ok { goto restore }
+    ok = p.ParseAndExpect(lexer.TokenId)
+    if !ok { goto restore }
+    id = p.Str
     for i := 0; i < len(FUNC_TABLE); i++ {
         FUNC := FUNC_TABLE[i]
         if FUNC.Id == id {
@@ -140,7 +152,8 @@ func (l *Lexer) ParseExpr() (expr Expr, err error) {
         }
     }
     if _func == nil {
-        err = fmt.Errorf("%s: Unknown function '%s'", l.Loc(), id)
+        p.SetErr(fmt.Errorf("Unknown function '%s'", id))
+        ok = false
         return
     }
     expr = Expr{Type: ExprFunc, Func: *_func}
@@ -150,17 +163,17 @@ func (l *Lexer) ParseExpr() (expr Expr, err error) {
         case QuantityRegular: log.Todof("QuantityRegular")
         case QuantityAny:
             for {
-                t, ok = l.PeekToken()
+                t, ok = p.PeekToken()
                 if !ok {
-                    err = fmt.Errorf("%s: unclosed parens", l.Loc())
+                    p.SetErr(fmt.Errorf("unclosed parens"))
                     goto restore
                 }
-                if t == TokenCParen { break }
-                _restore := l.Cursor
-                _expr, err = l.ParseExpr()
-                if err != nil { goto restore }
+                if t == lexer.TokenCParen { break }
+                _restore := p.Cursor
+                _expr, ok = p.ParseExpr()
+                if !ok { goto restore }
                 if _expr.Type != Type.Type {
-                    l.Cursor = _restore
+                    p.Cursor = _restore
                     break
                 }
                 expr.Args = append(expr.Args, _expr)
@@ -168,23 +181,24 @@ func (l *Lexer) ParseExpr() (expr Expr, err error) {
         case QuantityRange: log.Todof("QuantityRegular")
         }
     }
-    _expr, err = l.ParseExpr()
-    if err == nil {
-        err = fmt.Errorf("%s: invalid types, unexpected %s", l.Loc(), _expr.Type.Str())
+    _expr, ok = p.ParseExpr()
+    if ok {
+        ok = false
+        p.SetErr(fmt.Errorf("invalid types, unexpected %s", _expr.Type.Str()))
         goto restore
     }
-    t, ok = l.PeekToken()
+    t, ok = p.PeekToken()
     if !ok {
-        err = fmt.Errorf("%s: unclosed parens", l.Loc())
+        p.SetErr(fmt.Errorf("unclosed parens"))
         goto restore
     }
-    if t != TokenCParen {
-        err = fmt.Errorf("%s: unclosed parens %s", l.Loc(), t.Str())
+    if t != lexer.TokenCParen {
+        ok = false
+        p.SetErr(fmt.Errorf("unclosed parens %s", t.Str()))
         goto restore
     }
-    err = nil
     return
 restore:
-    l.Cursor = saved
+    p.Cursor = saved
     return
 }
