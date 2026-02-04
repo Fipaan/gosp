@@ -54,6 +54,7 @@ const (
     TokenComma
     TokenInt
     TokenDouble
+    TokenBool
     TokenError
 )
 func (t TokenType) OToC() TokenType {
@@ -97,6 +98,7 @@ func (t TokenType) Str() string {
     case TokenComma:    return ","
     case TokenInt:      return "int"
     case TokenDouble:   return "double"
+    case TokenBool:     return "bool"
     case TokenError:    return "error"
     }
     return "unknown"
@@ -117,6 +119,7 @@ type Lexer struct {
     Int      int64
     Double   float64
     Char     rune
+    Bool     bool
     
     Err      error
     ErrLoc   Location
@@ -295,6 +298,7 @@ restore:
 func (l *Lexer) ParseId() bool {
     saved := l.Cursor
     var chars []rune
+    var val string
     ch, state := l.Cursor.PeekChar(l)
     if state != ReadOk { goto restore }
     if !IsIdFirst(ch) { goto restore }
@@ -306,8 +310,18 @@ func (l *Lexer) ParseId() bool {
         if l.Cursor.SkipChar(l, ch) == ReadEOF { break }
     }
     if len(chars) == 0 { goto restore }
-    l.Type = TokenId
-    l.Str  = string(chars)
+    val = string(chars)
+    switch val {
+    case "true":
+        l.Type = TokenBool
+        l.Bool = true
+    case "false":
+        l.Type = TokenBool
+        l.Bool = false
+    default:
+        l.Type = TokenId
+        l.Str  = val
+    }
     return true
 restore:
     l.Cursor = saved
