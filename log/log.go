@@ -156,6 +156,9 @@ func Printf(format string, args ...any) {
 func Escapedf(format string, args ...any) {
 	Printf(ESC_STR + format, args...)
 }
+func Eprintf(format string, args ...any) {
+	Fprintf(os.Stderr, -1, format, args...)
+}
 func Errorf(format string, args ...any) {
 	Fprintf(os.Stderr, -1, "ERROR: " + format + "\n", args...)
 }
