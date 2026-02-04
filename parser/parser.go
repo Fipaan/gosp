@@ -58,25 +58,30 @@ type ExprKind uint8
 const (
     ExprNone ExprKind = iota
     ExprFunc
+    ExprList
     ExprId
     ExprStr
     ExprInt
     ExprDouble
+    ExprLet
 )
 func (t ExprKind) Str() string {
     switch (t) {
     case ExprNone:   return "none"
     case ExprFunc:   return "function"
+    case ExprList:   return "list"
     case ExprId:     return "id"
     case ExprStr:    return "str"
     case ExprInt:    return "int"
     case ExprDouble: return "double"
+    case ExprLet:    return "let-binding"
     }
     return "unknown"
 }
 func Str2ExprKind(kind string) ExprKind {
     switch kind {
     case "function": return ExprFunc
+    case "list":     return ExprList
     case "id":       return ExprId
     case "str":      return ExprStr
     case "int":      return ExprInt
@@ -95,14 +100,22 @@ func Token2ExprKind(t lexer.TokenType) ExprKind {
 }
 type Expr struct {
     Kind   ExprKind
-    Func   Function
-    Args   []Expr
+    
     Id     string
     Str    string
     Int    int64
     Double float64
+    
+    Func   Function
+    Args   []Expr
+    
+    List   []Expr
+
+    LetId   string
+    LetVal  *Expr
+    LetBody *Expr
 }
-func (p *Parser) Token2Expr(Type lexer.TokenType) (Expr, bool) {
+func (p *Parser) Token2Expr(gs *GospState, Type lexer.TokenType) (Expr, bool) {
     expr := Expr{Kind: Token2ExprKind(Type)}
     if expr.Kind == ExprNone { return expr, false }
     switch expr.Kind {
@@ -114,19 +127,30 @@ func (p *Parser) Token2Expr(Type lexer.TokenType) (Expr, bool) {
     }
     return expr, true
 }
-func (p *Parser) Token2ExprCurr() (expr Expr, ok bool) {
-    return p.Token2Expr(p.Type)
+func (p *Parser) Token2ExprCurr(gs *GospState) (expr Expr, ok bool) {
+    return p.Token2Expr(gs, p.Type)
 }
 func (expr *Expr) GetExprType() ExprType {
     EType := ExprType{Kind: expr.Kind}
     switch (EType.Kind) {
     case ExprFunc:
         EType.Func = expr.Func.Type
+    case ExprList:
+        if len(expr.List) > 0 {
+            var etNew ExprType
+            etNew = expr.List[0].GetExprType()
+            EType.List = &etNew
+        }
     case ExprNone:   fallthrough
     case ExprId:     fallthrough
     case ExprStr:    fallthrough
     case ExprInt:    fallthrough
     case ExprDouble: break
+    case ExprLet:
+        if expr.LetBody != nil {
+            return expr.LetBody.GetExprType()
+        }
+        EType.Kind = ExprNone
     default: log.Unreachable("unknown expr type: %s", EType.Kind.Str())
     }
     return EType
@@ -135,6 +159,10 @@ func (expr *Expr) Eval(gs *GospState) Expr {
     rexpr := *expr
     switch (expr.Kind) {
     case ExprFunc:   rexpr = expr.Func.Impl(gs, expr.Args)
+    case ExprList:
+        for i := 0; i < len(rexpr.List); i++ {
+            rexpr.List[i] = expr.List[i].Eval(gs)
+        }
     case ExprNone:   fallthrough
     case ExprStr:    fallthrough
     case ExprInt:    fallthrough
@@ -146,6 +174,16 @@ func (expr *Expr) Eval(gs *GospState) Expr {
             }
         }
         break
+    case ExprLet:
+        if expr.LetVal == nil || expr.LetBody == nil { return Expr{Kind: ExprNone} }
+        
+        val := expr.LetVal.Eval(gs)
+        saved := gs.Bindings
+        gs.Bindings = append(gs.Bindings, Binding{Id: expr.LetId, Val: val})
+        
+        result := expr.LetBody.Eval(gs)
+        gs.Bindings = saved
+        return result
     default: log.Unreachable("unknown expr type: %s", expr.Kind.Str())
     }
     return rexpr
@@ -156,6 +194,14 @@ func (expr *Expr) ToStr(gs *GospState) string {
     case ExprNone: return "undefined"
     case ExprFunc:
         log.Unreachable("unexpected expr type: %s", rexpr.Kind.Str())
+    case ExprList:
+        res := "["
+        for i := 0; i < len(rexpr.List); i++ {
+            if i > 0 { res += " " }
+            res += rexpr.List[i].ToStr(gs)
+        }
+        res += "]"
+        return res
     case ExprId:  return rexpr.Id
     case ExprStr: return rexpr.Str
     case ExprInt:
@@ -164,7 +210,7 @@ func (expr *Expr) ToStr(gs *GospState) string {
         return fmt.Sprintf("%f", rexpr.Double)
     default: log.Unreachable("unknown expr type: %s", rexpr.Kind.Str())
     }
- return ""
+    return ""
 }
 type FuncType struct {
     Types []ExprType
@@ -172,8 +218,9 @@ type FuncType struct {
     RType *ExprType
 }
 type ExprType struct {
-    Kind ExprKind
-    Func FuncType
+    Kind  ExprKind
+    List *ExprType
+    Func  FuncType
 }
 func (et ExprType) Str() string {
     return fmt.Sprintf("%s argument", et.Kind.Str())
@@ -210,6 +257,78 @@ func GospInit() GospState {
                         result += args[i].Eval(gs).Double 
                     }
                     return Expr{Kind: ExprDouble, Double: result}
+                },
+            },
+            Function{
+                Id: "-",
+                Type: FuncType{
+                    Types: []ExprType{
+                        ExprType{Kind: ExprDouble},
+                        ExprType{Kind: ExprDouble},
+                    },
+                    RType: &ExprType{Kind: ExprDouble},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    a := args[0].Eval(gs).Double
+                    b := args[1].Eval(gs).Double
+                    return Expr{Kind: ExprDouble, Double: a - b}
+                },
+            },
+            Function{
+                Id: "*",
+                Type: FuncType{
+                    VType: &ExprType{Kind: ExprDouble},
+                    RType: &ExprType{Kind: ExprDouble},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    result := 1.0
+                    for i := 0; i < len(args); i++ {
+                        result *= args[i].Eval(gs).Double 
+                    }
+                    return Expr{Kind: ExprDouble, Double: result}
+                },
+            },
+            Function{
+                Id: "/",
+                Type: FuncType{
+                    Types: []ExprType{
+                        ExprType{Kind: ExprDouble},
+                        ExprType{Kind: ExprDouble},
+                    },
+                    RType: &ExprType{Kind: ExprDouble},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    a := args[0].Eval(gs).Double
+                    b := args[1].Eval(gs).Double
+                    res := 0.0
+                    if b != 0.0 { res = a / b }
+                    return Expr{Kind: ExprDouble, Double: res}
+                },
+            },
+            Function{
+                Id: "map",
+                Type: FuncType{
+                    Types: []ExprType{
+                        ExprType{Kind: ExprId},
+                        ExprType{Kind: ExprList},
+                    },
+                    RType: &ExprType{Kind: ExprList},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    var Func *Function
+                    for i := 0; i < len(gs.Funcs); i++ {
+                        if gs.Funcs[i].Id == args[0].Id {
+                            Func = &gs.Funcs[i]
+                            break
+                        }
+                    }
+                    if Func == nil { return Expr{Kind: ExprList, List: []Expr{}} }
+                    ins := args[1].Eval(gs).List
+                    var outs []Expr
+                    for i := 0; i < len(ins); i++ {
+                        outs = append(outs, Func.Impl(gs, []Expr{ins[i]}))
+                    }
+                    return Expr{Kind: ExprList, List: outs}
                 },
             },
         },
@@ -259,6 +378,11 @@ func (et ExprType) SimpType() ExprType {
         } else {
             thisType.Kind = ExprNone
         }
+    case ExprList:
+        if et.List != nil {
+            var etypeNew = et.List.SimpType()
+            thisType.List = &etypeNew
+        }
     case ExprNone:   fallthrough
     case ExprId:     fallthrough
     case ExprStr:    fallthrough
@@ -271,6 +395,9 @@ func (et ExprType) SimpType() ExprType {
 func (et ExprType) SameType(other ExprType) (ok bool) {
     if et.Kind != other.Kind { return }
     switch (et.Kind) {
+    case ExprList:   return et.List == nil ||
+                            other.List == nil ||
+                            et.List.SameType(*other.List)
     case ExprFunc:   fallthrough // TODO: proper function check
     case ExprNone:   fallthrough
     case ExprId:     fallthrough
@@ -331,33 +458,56 @@ func (p *Parser) CheckUnique(gs *GospState, binding string) (ok bool) {
 }
 func (p *Parser) ParseLet(gs *GospState) (expr Expr, ok, validObj bool) {
     var binding string
-    var bindingVal Expr
+    var bindingVal, body Expr
+    
     savedCur := p.Cursor
     savedBindings := gs.Bindings
+    
     ok = p.ParseAndExpect(lexer.TokenOParen)
     if !ok { goto restore }
+    
     ok  = p.ParseAndExpect(lexer.TokenId)
     if !ok { goto restore }
+    
     if p.Str != "let" {
         p.ExpectedErr("let", p.Str)
         ok = false
         goto restore
     }
     validObj = true
+    
     ok = p.ParseAndExpect(lexer.TokenId)
     if !ok { goto restore }
     binding = p.Str
+    
     ok = p.CheckUnique(gs, binding)
     if !ok { goto restore }
+    
     bindingVal, ok = p.ParseExpr(gs)
     if !ok { goto restore }
-    bindingVal = bindingVal.Eval(gs)
-    gs.Bindings = append(gs.Bindings, Binding{Id: binding, Val: bindingVal})
-    expr, ok = p.ParseExpr(gs)
+    
+    gs.Bindings = append(gs.Bindings,
+        Binding{
+            Id: binding,
+            Val: bindingVal.GetExprType().SimpType().ZeroExpr(),
+        },
+    )
+    
+    body, ok = p.ParseExpr(gs)
     if !ok { goto restore }
+    
     ok = p.ParseAndExpect(lexer.TokenCParen)
     if !ok { goto restore }
+
     gs.Bindings = savedBindings
+
+    expr = Expr{
+        Kind:    ExprLet,
+        LetId:   binding,
+        LetVal:  &bindingVal,
+        LetBody: &body,
+    }
+
     return
 restore:
     p.Cursor = savedCur
@@ -371,6 +521,7 @@ func (et ExprType) ZeroExpr() Expr {
     case ExprStr:    return Expr{Kind: ExprStr, Str: ""}
     case ExprId:     return Expr{Kind: ExprId, Id: ""}
     case ExprFunc:   return Expr{Kind: ExprFunc, Func: Function{Type: et.Func}}
+    case ExprList:   return Expr{Kind: ExprList, List: []Expr{}}
     case ExprNone:   return Expr{Kind: ExprNone}
     default:         return Expr{Kind: ExprNone}
     }
@@ -553,14 +704,52 @@ restore:
     gs.Bindings = savedBindings
     return
 }
-
+func (p *Parser) ParseList(gs *GospState) (expr Expr, ok bool) {
+    var savedCur2 lexer.Location
+    var savedBindings2 []Binding
+    var exprArg Expr
+    var exprType ExprType
+    savedCur := p.Cursor
+    savedBindings := gs.Bindings
+    ok = p.ParseAndExpect(lexer.TokenOBracket)
+    if !ok { goto restore }
+    expr.Kind = ExprList
+    savedCur2 = p.Cursor
+    savedBindings2 = gs.Bindings
+    exprArg, ok = p.ParseExpr(gs)
+    if !ok {
+        ok = p.ParseAndExpect(lexer.TokenCBracket)
+        if !ok { goto restore }
+    }
+    p.Cursor = savedCur2
+    gs.Bindings = savedBindings2
+    exprType = exprArg.GetExprType()
+    for {
+        exprArg, ok = p.ParseExpr(gs)
+        if !ok {
+            ok = p.ParseAndExpect(lexer.TokenCBracket)
+            if !ok { goto restore }
+            break
+        }
+        if !exprType.SameType(exprArg.GetExprType().SimpType()) {
+            p.ExpectedErr(exprType.Str(), exprArg.GetExprType().Str())
+            goto restore
+        }
+        expr.List = append(expr.List, exprArg)
+    }
+    return
+restore:
+    p.Cursor = savedCur
+    gs.Bindings = savedBindings
+    return
+}
 func (p *Parser) ParseExpr(gs *GospState) (expr Expr, ok bool) {
     savedCur := p.Cursor
     savedBindings := gs.Bindings
     var ttype lexer.TokenType
     ttype, ok = p.PeekToken()
     if !ok { return Expr{Kind: ExprNone}, true }
-    expr, ok = p.Token2Expr(ttype)
+    expr, ok = p.Token2Expr(gs, ttype)
     if ok {
         _, ok = p.GetToken()
         return
@@ -574,6 +763,11 @@ func (p *Parser) ParseExpr(gs *GospState) (expr Expr, ok bool) {
         if ok { return }
         if validObj { goto restore }
         expr, ok = p.ParseFunc(gs)
+        if !ok { goto restore }
+        return
+    }
+    if ttype == lexer.TokenOBracket {
+        expr, ok = p.ParseList(gs)
         if !ok { goto restore }
         return
     }
