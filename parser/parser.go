@@ -54,16 +54,16 @@ func (p *Parser) ExpectEOF() bool {
     return true
 }
 
-type ExprType uint8
+type ExprKind uint8
 const (
-    ExprNone ExprType = iota
+    ExprNone ExprKind = iota
     ExprFunc
     ExprId
     ExprStr
     ExprInt
     ExprDouble
 )
-func (t ExprType) Str() string {
+func (t ExprKind) Str() string {
     switch (t) {
     case ExprNone:   return "none"
     case ExprFunc:   return "function"
@@ -74,7 +74,7 @@ func (t ExprType) Str() string {
     }
     return "unknown"
 }
-func Token2ExprType(t lexer.TokenType) ExprType {
+func Token2ExprKind(t lexer.TokenType) ExprKind {
     switch t {
         case lexer.TokenId:     return ExprId
         case lexer.TokenStr:    return ExprStr
@@ -84,7 +84,7 @@ func Token2ExprType(t lexer.TokenType) ExprType {
     return ExprNone
 }
 type Expr struct {
-    Type   ExprType
+    Kind   ExprKind
     Func   Function
     Args   []Expr
     Id     string
@@ -93,79 +93,127 @@ type Expr struct {
     Double float64
 }
 func (p *Parser) Token2Expr(Type lexer.TokenType) (Expr, bool) {
-    expr := Expr{Type: Token2ExprType(Type)}
-    if expr.Type == ExprNone { return expr, false }
-    switch expr.Type {
+    expr := Expr{Kind: Token2ExprKind(Type)}
+    if expr.Kind == ExprNone { return expr, false }
+    switch expr.Kind {
         case ExprId:     expr.Id     = p.Str
         case ExprStr:    expr.Str    = p.Str
         case ExprInt:    expr.Int    = p.Int
         case ExprDouble: expr.Double = p.Double
-        default: log.Unreachable("unexpected expression type: %s", expr.Type.Str())
+        default: log.Unreachable("unexpected expression type: %s", expr.Kind.Str())
     }
     return expr, true
 }
 func (p *Parser) Token2ExprCurr() (expr Expr, ok bool) {
     return p.Token2Expr(p.Type)
 }
-func (expr *Expr) Eval() string {
-    switch (expr.Type) {
+func (expr *Expr) GetExprType() ExprType {
+    EType := ExprType{Kind: expr.Kind}
+    switch (EType.Kind) {
+    case ExprFunc:
+        EType.Func = expr.Func.Type
+    case ExprNone:   fallthrough
+    case ExprId:     fallthrough
+    case ExprStr:    fallthrough
+    case ExprInt:    fallthrough
+    case ExprDouble: break
+    default: log.Unreachable("unknown expr type: %s", EType.Kind.Str())
+    }
+    return EType
+}
+func (expr *Expr) Eval(gs *GospState) Expr {
+    rexpr := *expr
+    switch (expr.Kind) {
+    case ExprFunc:   rexpr = expr.Func.Impl(gs, expr.Args)
+    case ExprNone:   fallthrough
+    case ExprId:     fallthrough
+    case ExprStr:    fallthrough
+    case ExprInt:    fallthrough
+    case ExprDouble: break
+    default: log.Unreachable("unknown expr type: %s", expr.Kind.Str())
+    }
+    return rexpr
+}
+func (expr *Expr) ToStr(gs *GospState) string {
+    rexpr := expr.Eval(gs)
+    switch (rexpr.Kind) {
     case ExprNone: return "undefined"
     case ExprFunc:
-        res := expr.Func.Impl(expr.Args)
-        return (&res).Eval()
-    case ExprId:  return expr.Id
-    case ExprStr: return expr.Str
+        log.Unreachable("unexpected expr type: %s", rexpr.Kind.Str())
+    case ExprId:  return rexpr.Id
+    case ExprStr: return rexpr.Str
     case ExprInt:
-        return fmt.Sprintf("%d", expr.Int)
+        return fmt.Sprintf("%d", rexpr.Int)
     case ExprDouble:
-        return fmt.Sprintf("%f", expr.Double)
+        return fmt.Sprintf("%f", rexpr.Double)
+    default: log.Unreachable("unknown expr type: %s", rexpr.Kind.Str())
     }
-    log.Abortf("unknown type"); return ""
+ return ""
 }
-type ArgType struct {
-    Type  ExprType
+type FuncType struct {
+    Types []ExprType
+    VType *ExprType
+    RType *ExprType
 }
-func (at ArgType) Str() string {
-    return fmt.Sprintf("%s argument", at.Type.Str())
+type ExprType struct {
+    Kind ExprKind
+    Func FuncType
+}
+func (et ExprType) Str() string {
+    return fmt.Sprintf("%s argument", et.Kind.Str())
 }
 type Function struct {
     Id    string
-    Types []ArgType
-    Impl  func([]Expr) Expr
-    VType ArgType // variadic args
+    Type  FuncType
+    Impl  func(*GospState, []Expr) Expr
+}
+type Binding struct {
+    Id  string
+    Val Expr
+}
+type GospState struct {
+    Funcs    []Function
+    Bindings []Binding
+}
+func GospInit() GospState {
+    return GospState {
+        Funcs:[]Function {
+            Function{
+                Id: "+",
+                Type: FuncType{
+                    VType: &ExprType{Kind: ExprDouble},
+                    RType: &ExprType{Kind: ExprDouble},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    result := 0.0
+                    for i := 0; i < len(args); i++ {
+                        result += args[i].Eval(gs).Double 
+                    }
+                    return Expr{Kind: ExprDouble, Double: result}
+                },
+            },
+        },
+    }
 }
 func (p *Parser) ExpectedFuncErr(Func Function, expected, got string) {
     p.PExpectedErr(Func.Id, expected, got)
 }
-func (p *Parser) ExpectedFuncNotNothing(Func Function, AType ArgType) {
-    p.ExpectedFuncErr(Func, AType.Str(), "nothing")
+func (p *Parser) ExpectedFuncNotNothing(Func Function, EType ExprType) {
+    p.ExpectedFuncErr(Func, EType.Str(), "nothing")
 }
-func (p *Parser) ExpectedFuncMismatch(Func Function, AType ArgType, expr Expr) {
-    p.ExpectedFuncErr(Func, AType.Str(), expr.Type.Str())
+func (p *Parser) ExpectedFuncMismatch(Func Function, EType ExprType, expr Expr) {
+    p.ExpectedFuncErr(Func, EType.Str(), expr.GetExprType().Str())
 }
 func (p *Parser) ExpectedFuncNotEnough(Func Function, expected string) {
     p.SetErr(fmt.Errorf("%s: Not enough arguments (expected %s)", Func.Id, expected))
 }
 func (p *Parser) ExpectedFuncTooMany(Func Function, expr Expr) {
-    p.SetErr(fmt.Errorf("%s: Too many arguments (unexpected %s)", Func.Id, expr.Type.Str()))
+    p.SetErr(fmt.Errorf("%s: Too many arguments (unexpected %s)", Func.Id, expr.Kind.Str()))
 }
 func (p *Parser) ExpectedFuncEnd(Func Function, got string) {
     p.ExpectedFuncErr(Func, lexer.TokenCParen.Str(), got)
 }
-var FUNC_TABLE = []Function {
-    Function{
-        Id: "+",
-        VType: ArgType{Type: ExprDouble},
-        Impl: func(args []Expr) Expr {
-            result := 0.0
-            for i := 0; i < len(args); i++ {
-                result += args[i].Double 
-            }
-            return Expr{Type: ExprDouble, Double: result}
-        },
-    },
-}
-func (p *Parser) ParseFuncArgAny(Func Function, strType string,
+func (p *Parser) ParseFuncArgAny(gs *GospState, Func Function, strType string,
                                  isVType bool) (expr Expr, ok bool) {
     var ttype lexer.TokenType
     ttype, ok = p.PeekToken()
@@ -180,37 +228,152 @@ func (p *Parser) ParseFuncArgAny(Func Function, strType string,
         }
         return
     }
-    return p.ParseExpr()
+    return p.ParseExpr(gs)
 }
-func (p *Parser) ParseFuncArg(Func Function, AType ArgType,
+func (et ExprType) SimpType() ExprType {
+    thisType := ExprType{Kind: et.Kind}
+    switch (thisType.Kind) {
+    case ExprFunc:
+        if et.Func.RType != nil {
+            thisType = *et.Func.RType
+        } else {
+            thisType.Kind = ExprNone
+        }
+    case ExprNone:   fallthrough
+    case ExprId:     fallthrough
+    case ExprStr:    fallthrough
+    case ExprInt:    fallthrough
+    case ExprDouble: break
+    default: log.Unreachable("unknown expr type: %s", thisType.Kind.Str())
+    }
+    return thisType
+}
+func (et ExprType) SameType(other ExprType) (ok bool) {
+    if et.Kind != other.Kind { return }
+    switch (et.Kind) {
+    case ExprFunc:   fallthrough // TODO: proper function check
+    case ExprNone:   fallthrough
+    case ExprId:     fallthrough
+    case ExprStr:    fallthrough
+    case ExprInt:    fallthrough
+    case ExprDouble: break
+    default: log.Unreachable("unknown expr type: %s", et.Kind.Str())
+    }
+    return true
+}
+func (p *Parser) ParseFuncArg(gs *GospState, Func Function, EType ExprType,
                               isVType bool) (expr Expr, ok bool) {
-    saved := p.Cursor
-    expr, ok = p.ParseFuncArgAny(Func, AType.Str(), isVType)
+    savedCur := p.Cursor
+    savedBindings := gs.Bindings
+    expr, ok = p.ParseFuncArgAny(gs, Func, EType.Str(), isVType)
     if !ok { goto restore }
-    if isVType && expr.Type == ExprNone { return }
-    if expr.Type != AType.Type {
-        p.ExpectedFuncMismatch(Func, AType, expr)
+    for expr.Kind == ExprId {
+        var exprBind *Binding
+        for i := 0; i < len(gs.Bindings); i++ {
+            bind := gs.Bindings[i]
+            if bind.Id == expr.Id {
+                exprBind = &bind
+                break
+            }
+        }
+        if exprBind == nil { break }
+        expr = exprBind.Val
+    }
+    if isVType && expr.Kind == ExprNone { return }
+    if !EType.SameType(expr.GetExprType().SimpType()) {
+        p.ExpectedFuncMismatch(Func, EType, expr)
         ok = false
         goto restore
     }
     return
 restore:
-    p.Cursor = saved
+    p.Cursor = savedCur
+    gs.Bindings = savedBindings
     return
 }
-func (p *Parser) ParseFunc() (expr Expr, ok bool) {
-    var ttype    lexer.TokenType
+func (p *Parser) ParseLet(gs *GospState) (expr Expr, ok, validObj bool) {
+    var binding string
+    var bindingVal Expr
+    savedCur := p.Cursor
+    savedBindings := gs.Bindings
+    ok = p.ParseAndExpect(lexer.TokenOParen)
+    if !ok { goto restore }
+    ok  = p.ParseAndExpect(lexer.TokenId)
+    if !ok { goto restore }
+    if p.Str != "let" {
+        p.ExpectedErr("let", p.Str)
+        ok = false
+        goto restore
+    }
+    validObj = true
+    ok = p.ParseAndExpect(lexer.TokenId)
+    if !ok { goto restore }
+    binding = p.Str
+    for i := 0; i < len(gs.Funcs); i++ {
+        if gs.Funcs[i].Id == binding {
+            p.SetErr(fmt.Errorf("`%s` already exists: function", binding))
+            ok = false
+            goto restore
+        }
+    }
+    for i := 0; i < len(gs.Bindings); i++ {
+        if gs.Bindings[i].Id == binding {
+            p.SetErr(fmt.Errorf("`%s` already exists: let", binding))
+            ok = false
+            goto restore
+        }
+    }
+    bindingVal, ok = p.ParseExpr(gs)
+    if !ok { goto restore }
+    bindingVal = bindingVal.Eval(gs)
+    gs.Bindings = append(gs.Bindings, Binding{Id: binding, Val: bindingVal})
+    expr, ok = p.ParseExpr(gs)
+    if !ok { goto restore }
+    ok = p.ParseAndExpect(lexer.TokenCParen)
+    if !ok { goto restore }
+    gs.Bindings = savedBindings
+    return
+restore:
+    p.Cursor = savedCur
+    gs.Bindings = savedBindings
+    return
+}
+func (p *Parser) ParseDefun(gs *GospState) (expr Expr, ok, validObj bool) {
+    // var Func    *Function
+    // var id       string
+    // var exprArg  Expr
+    savedCur := p.Cursor
+    savedBindings := gs.Bindings
+    ok = p.ParseAndExpect(lexer.TokenOParen)
+    if !ok { goto restore }
+    ok  = p.ParseAndExpect(lexer.TokenId)
+    if !ok { goto restore }
+    if p.Str != "defun" {
+        p.ExpectedErr("defun", p.Str)
+        ok = false
+        goto restore
+    }
+    validObj = true
+    log.Todof("defun")
+    return
+restore:
+    p.Cursor = savedCur
+    gs.Bindings = savedBindings
+    return
+}
+func (p *Parser) ParseFunc(gs *GospState) (expr Expr, ok bool) {
     var Func    *Function
     var id       string
     var exprArg  Expr
-    saved := p.Cursor
+    savedCur := p.Cursor
+    savedBindings := gs.Bindings
     ok = p.ParseAndExpect(lexer.TokenOParen)
     if !ok { goto restore }
     ok  = p.ParseAndExpect(lexer.TokenId)
     if !ok { goto restore }
     id = p.Str
-    for i := 0; i < len(FUNC_TABLE); i++ {
-        FUNC := FUNC_TABLE[i]
+    for i := 0; i < len(gs.Funcs); i++ {
+        FUNC := gs.Funcs[i]
         if FUNC.Id == id {
             Func = &FUNC
             break
@@ -221,64 +384,89 @@ func (p *Parser) ParseFunc() (expr Expr, ok bool) {
         ok = false
         return
     }
-    expr = Expr{Type: ExprFunc, Func: *Func}
-    for i := 0; i < len(expr.Func.Types); i++ {
-        AType := expr.Func.Types[i]
+    expr = Expr{Kind: ExprFunc, Func: *Func}
+    for i := 0; i < len(expr.Func.Type.Types); i++ {
+        EType := expr.Func.Type.Types[i]
         const isVType = false
-        exprArg, ok = p.ParseFuncArg(expr.Func, AType, isVType)
+        exprArg, ok = p.ParseFuncArg(gs, expr.Func, EType, isVType)
         if !ok { goto restore }
         expr.Args = append(expr.Args, exprArg)
     }
-    if expr.Func.VType.Type != ExprNone {
-        AType := expr.Func.VType
+    const isVType = true
+    if expr.Func.Type.VType != nil {
+        EType := *expr.Func.Type.VType
         for {
-            const isVType = true
-            exprArg, ok = p.ParseFuncArg(expr.Func, AType, isVType)
+            exprArg, ok = p.ParseFuncArg(gs, expr.Func, EType, isVType)
             if !ok { goto restore }
-            if exprArg.Type == ExprNone { break }
+            if exprArg.Kind == ExprNone { break }
             expr.Args = append(expr.Args, exprArg)
         }
     }
-    const isVType = true
-    exprArg, ok = p.ParseFuncArgAny(expr.Func, "", isVType)
-    if ok && exprArg.Type != ExprNone {
+    exprArg, ok = p.ParseFuncArgAny(gs, expr.Func, "", isVType)
+    if ok && exprArg.Kind != ExprNone {
         p.ExpectedFuncTooMany(expr.Func, exprArg)
         ok = false
         goto restore
     }
-    ttype, ok = p.PeekToken()
+    ok = p.ParseAndExpect(lexer.TokenCParen)
     if !ok {
-        p.ExpectedFuncEnd(expr.Func, "nothing")
-        goto restore
-    }
-    if ttype != lexer.TokenCParen {
-        p.ExpectedFuncEnd(expr.Func, ttype.Str())
-        ok = false
         goto restore
     }
     return
 restore:
-    p.Cursor = saved
+    p.Cursor = savedCur
+    gs.Bindings = savedBindings
     return
 }
 
-func (p *Parser) ParseExpr() (expr Expr, ok bool) {
-    saved := p.Cursor
+func (p *Parser) ParseExpr(gs *GospState) (expr Expr, ok bool) {
+    savedCur := p.Cursor
+    savedBindings := gs.Bindings
     var ttype lexer.TokenType
     ttype, ok = p.PeekToken()
-    if !ok { return Expr{Type: ExprNone}, true }
+    if !ok { return Expr{Kind: ExprNone}, true }
     expr, ok = p.Token2Expr(ttype)
     if ok {
         _, ok = p.GetToken()
         return
     }
     if ttype == lexer.TokenOParen {
-        expr, ok = p.ParseFunc()
+        var validObj bool
+        expr, ok, validObj = p.ParseLet(gs)
+        if ok { return }
+        if validObj { goto restore }
+        expr, ok, validObj = p.ParseDefun(gs)
+        if ok { return }
+        if validObj { goto restore }
+        expr, ok = p.ParseFunc(gs)
         if !ok { goto restore }
         return
     }
     p.SetErr(fmt.Errorf("Unknown token: %s", ttype.Str()))
 restore:
-    p.Cursor = saved
+    p.Cursor = savedCur
+    gs.Bindings = savedBindings
     return
+}
+
+func (p *Parser) SkipExpr() bool {
+    something := false
+    exprDepth := 0
+    sourceIndex := p.Cursor.SourceIndex
+    line := p.Cursor.Line
+    for {
+        ok := p.ParseToken()
+        if !ok { return something }
+        if p.Cursor.Line != line ||
+           p.Cursor.SourceIndex != sourceIndex { return something }
+        something = true
+        if p.Type == lexer.TokenOParen {
+            exprDepth += 1
+            continue
+        }
+        if p.Type == lexer.TokenCParen {
+            exprDepth -= 1
+            if exprDepth <= 0 { return something }
+        }
+    }
 }

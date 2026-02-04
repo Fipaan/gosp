@@ -231,12 +231,13 @@ func (sv *Server) HandleExpr(w http.ResponseWriter, r *http.Request) {
     
     p := parser.ParserInit()
     p.AddSourceNamed("post-request", req.Expr)
-    expr, ok := p.ParseExpr()
+    gs := parser.GospInit()
+    expr, ok := p.ParseExpr(&gs)
     if !ok {
 		WriteAPIError(w, http.StatusBadRequest, &p.ErrLoc, p.Err.Error())
 		return
     }
-    res := expr.Eval()
+    res := expr.ToStr(&gs)
 
 	if username != "" {
 		ctx, cancel := sv.WithTimeout(r)

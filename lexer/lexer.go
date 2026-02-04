@@ -148,16 +148,7 @@ func (l *Lexer) AddSourceFile(src string) error {
     l.AddSourceNamed(src, string(bytes))
     return nil
 }
-func (l *Lexer) TokenStr() string {
-    saved    := l.Cursor
-    locStart := l.TokenLoc
-    l.Cursor  = locStart
-    if !l.ParseToken() {
-        l.Cursor = saved
-        return ""
-    }
-    locEnd  := l.Cursor
-    l.Cursor = saved
+func (l *Lexer) TokenStr(locStart, locEnd Location) string {
     if locStart.SourceIndex == -1 || locStart.SourceIndex >= len(l.Sources) { return "" }
     if locStart.SourceIndex != locEnd.SourceIndex { return "" }
     if locStart.Raw > locEnd.Raw { return "" }
