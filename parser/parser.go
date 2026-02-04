@@ -74,6 +74,16 @@ func (t ExprKind) Str() string {
     }
     return "unknown"
 }
+func Str2ExprKind(kind string) ExprKind {
+    switch kind {
+    case "function": return ExprFunc
+    case "id":       return ExprId
+    case "str":      return ExprStr
+    case "int":      return ExprInt
+    case "double":   return ExprDouble
+    }
+    return ExprNone
+}
 func Token2ExprKind(t lexer.TokenType) ExprKind {
     switch t {
         case lexer.TokenId:     return ExprId
@@ -126,10 +136,16 @@ func (expr *Expr) Eval(gs *GospState) Expr {
     switch (expr.Kind) {
     case ExprFunc:   rexpr = expr.Func.Impl(gs, expr.Args)
     case ExprNone:   fallthrough
-    case ExprId:     fallthrough
     case ExprStr:    fallthrough
     case ExprInt:    fallthrough
     case ExprDouble: break
+    case ExprId:
+        for i := 0; i <  len(gs.Bindings); i++ {
+            if gs.Bindings[i].Id == expr.Id {
+                return gs.Bindings[i].Val.Eval(gs)
+            }
+        }
+        break
     default: log.Unreachable("unknown expr type: %s", expr.Kind.Str())
     }
     return rexpr
@@ -170,6 +186,10 @@ type Function struct {
 type Binding struct {
     Id  string
     Val Expr
+}
+type NamedArg struct {
+    Id   string
+    Type ExprType
 }
 type GospState struct {
     Funcs    []Function
@@ -263,24 +283,26 @@ func (et ExprType) SameType(other ExprType) (ok bool) {
 }
 func (p *Parser) ParseFuncArg(gs *GospState, Func Function, EType ExprType,
                               isVType bool) (expr Expr, ok bool) {
+    var checkExpr Expr
     savedCur := p.Cursor
     savedBindings := gs.Bindings
     expr, ok = p.ParseFuncArgAny(gs, Func, EType.Str(), isVType)
     if !ok { goto restore }
-    for expr.Kind == ExprId {
+    checkExpr = expr
+    for checkExpr.Kind == ExprId {
         var exprBind *Binding
         for i := 0; i < len(gs.Bindings); i++ {
-            bind := gs.Bindings[i]
-            if bind.Id == expr.Id {
-                exprBind = &bind
+            if gs.Bindings[i].Id == expr.Id {
+                exprBind = &gs.Bindings[i]
                 break
             }
         }
         if exprBind == nil { break }
-        expr = exprBind.Val
+        checkExpr = exprBind.Val
     }
+    
     if isVType && expr.Kind == ExprNone { return }
-    if !EType.SameType(expr.GetExprType().SimpType()) {
+    if !EType.SameType(checkExpr.GetExprType().SimpType()) {
         p.ExpectedFuncMismatch(Func, EType, expr)
         ok = false
         goto restore
@@ -290,6 +312,22 @@ restore:
     p.Cursor = savedCur
     gs.Bindings = savedBindings
     return
+}
+func (p *Parser) CheckUnique(gs *GospState, binding string) (ok bool) {
+    for i := 0; i < len(gs.Funcs); i++ {
+        if gs.Funcs[i].Id == binding {
+            p.SetErr(fmt.Errorf("`%s` already exists: function", binding))
+            return false
+        }
+    }
+    for i := 0; i < len(gs.Bindings); i++ {
+        if gs.Bindings[i].Id == binding {
+            p.SetErr(fmt.Errorf("`%s` already exists: let", binding))
+            ok = false
+            return false
+        }
+    }
+    return true
 }
 func (p *Parser) ParseLet(gs *GospState) (expr Expr, ok, validObj bool) {
     var binding string
@@ -309,20 +347,8 @@ func (p *Parser) ParseLet(gs *GospState) (expr Expr, ok, validObj bool) {
     ok = p.ParseAndExpect(lexer.TokenId)
     if !ok { goto restore }
     binding = p.Str
-    for i := 0; i < len(gs.Funcs); i++ {
-        if gs.Funcs[i].Id == binding {
-            p.SetErr(fmt.Errorf("`%s` already exists: function", binding))
-            ok = false
-            goto restore
-        }
-    }
-    for i := 0; i < len(gs.Bindings); i++ {
-        if gs.Bindings[i].Id == binding {
-            p.SetErr(fmt.Errorf("`%s` already exists: let", binding))
-            ok = false
-            goto restore
-        }
-    }
+    ok = p.CheckUnique(gs, binding)
+    if !ok { goto restore }
     bindingVal, ok = p.ParseExpr(gs)
     if !ok { goto restore }
     bindingVal = bindingVal.Eval(gs)
@@ -338,12 +364,26 @@ restore:
     gs.Bindings = savedBindings
     return
 }
+func (et ExprType) ZeroExpr() Expr {
+    switch et.Kind {
+    case ExprDouble: return Expr{Kind: ExprDouble, Double: 0}
+    case ExprInt:    return Expr{Kind: ExprInt, Int: 0}
+    case ExprStr:    return Expr{Kind: ExprStr, Str: ""}
+    case ExprId:     return Expr{Kind: ExprId, Id: ""}
+    case ExprFunc:   return Expr{Kind: ExprFunc, Func: Function{Type: et.Func}}
+    case ExprNone:   return Expr{Kind: ExprNone}
+    default:         return Expr{Kind: ExprNone}
+    }
+}
 func (p *Parser) ParseDefun(gs *GospState) (expr Expr, ok, validObj bool) {
-    // var Func    *Function
-    // var id       string
-    // var exprArg  Expr
+    var body Expr
+    var RType ExprType
+    var capturedArgs []NamedArg
+    var savedBindings2 []Binding
+    var Func Function
+    var nargs []NamedArg
     savedCur := p.Cursor
-    savedBindings := gs.Bindings
+    savedBindings  := gs.Bindings
     ok = p.ParseAndExpect(lexer.TokenOParen)
     if !ok { goto restore }
     ok  = p.ParseAndExpect(lexer.TokenId)
@@ -354,7 +394,103 @@ func (p *Parser) ParseDefun(gs *GospState) (expr Expr, ok, validObj bool) {
         goto restore
     }
     validObj = true
-    log.Todof("defun")
+    ok  = p.ParseAndExpect(lexer.TokenId)
+    if !ok { goto restore }
+    Func.Id = p.Str
+    ok = p.CheckUnique(gs, Func.Id)
+    if !ok { goto restore }
+    ok = p.ParseAndExpect(lexer.TokenOParen)
+    if !ok { goto restore }
+    for {
+        var ttype lexer.TokenType
+        var exprArg Expr
+        ttype, ok = p.PeekToken()
+        if !ok { goto restore }
+        if ttype == lexer.TokenCParen { break }
+        if ttype != lexer.TokenId {
+            exprArg, ok = p.ParseExpr(gs)
+            if !ok {
+                p.ExpectedErr(lexer.TokenId.Str(), ttype.Str())
+            } else {
+                p.ExpectedErr(lexer.TokenId.Str(), exprArg.Kind.Str())
+            }
+            goto restore
+        }
+        narg := NamedArg{}
+        ok = p.ParseAndExpect(lexer.TokenId)
+        if !ok { goto restore }
+        narg.Id = p.Str
+        ok = p.CheckUnique(gs, narg.Id)
+        if !ok { goto restore }
+        for i := 0; i < len(nargs); i++ {
+            if nargs[i].Id == narg.Id {
+                p.SetErr(fmt.Errorf("`%s` already exists: arg", narg.Id))
+                ok = false
+                goto restore
+            }
+        }
+        ok = p.ParseAndExpect(lexer.TokenId)
+        narg.Type.Kind = Str2ExprKind(p.Str)
+        if narg.Type.Kind == ExprNone {
+            p.SetErr(fmt.Errorf("unknown type: `%s`", p.Str))
+            ok = false
+            goto restore
+        }
+        nargs = append(nargs, narg)
+    }
+    ok = p.ParseAndExpect(lexer.TokenCParen)
+    if !ok { goto restore }
+
+    ok = p.CheckUnique(gs, Func.Id)
+    if !ok { goto restore }
+
+    Func.Type.Types = make([]ExprType, len(nargs))
+    for i := 0; i < len(nargs); i++ {
+        Func.Type.Types[i] = nargs[i].Type
+    }
+
+    savedBindings2 = gs.Bindings
+    for i := 0; i < len(nargs); i++ {
+        gs.Bindings = append(gs.Bindings, Binding{
+            Id:  nargs[i].Id,
+            Val: nargs[i].Type.ZeroExpr(),
+        })
+    }
+
+    body, ok = p.ParseExpr(gs)
+    gs.Bindings = savedBindings2
+    if !ok { goto restore }
+
+    RType = body.GetExprType().SimpType()
+    Func.Type.RType = &RType
+
+    ok = p.ParseAndExpect(lexer.TokenCParen)
+    if !ok { goto restore }
+
+    capturedArgs = make([]NamedArg, len(nargs))
+    copy(capturedArgs, nargs)
+
+    Func.Impl = func(gs *GospState, args []Expr) Expr {
+        savedBindings := gs.Bindings
+
+        for i := 0; i < len(capturedArgs) && i < len(args); i++ {
+            val := args[i].Eval(gs)
+            gs.Bindings = append(gs.Bindings, Binding{
+                Id:  capturedArgs[i].Id,
+                Val: val,
+            })
+        }
+
+        result := body.Eval(gs)
+        gs.Bindings = savedBindings
+        return result
+    }
+
+    gs.Funcs = append(gs.Funcs, Func)
+
+    expr = Expr{Kind: ExprNone}
+    ok = true
+
     return
 restore:
     p.Cursor = savedCur
@@ -373,9 +509,8 @@ func (p *Parser) ParseFunc(gs *GospState) (expr Expr, ok bool) {
     if !ok { goto restore }
     id = p.Str
     for i := 0; i < len(gs.Funcs); i++ {
-        FUNC := gs.Funcs[i]
-        if FUNC.Id == id {
-            Func = &FUNC
+        if gs.Funcs[i].Id == id {
+            Func = &gs.Funcs[i]
             break
         }
     }
