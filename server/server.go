@@ -230,7 +230,7 @@ func (sv *Server) HandleExpr(w http.ResponseWriter, r *http.Request) {
 	}
     
     p := parser.ParserInit()
-    p.AddNamedExpr("post-request", req.Expr)
+    p.AddSourceNamed("post-request", req.Expr)
     expr, ok := p.ParseExpr()
     if !ok {
 		WriteAPIError(w, http.StatusBadRequest, &p.ErrLoc, p.Err.Error())

@@ -129,22 +129,7 @@ func LexerInit() (l Lexer) {
     l.Type                 = TokenNone
     return
 }
-func (l *Lexer) AddSourceFile(src string) error {
-    bytes, err := os.ReadFile(src)
-    if err != nil { return err }
-    l.Sources = append(l.Sources, Source{
-        Name:  src,
-        Chars: []rune(string(bytes)),
-    })
-    if l.Cursor.SourceIndex == -1 {
-        l.Cursor.SourceIndex = 0
-        l.Cursor.Source      = src
-        l.Cursor.Line        = 1
-        l.Cursor.Column      = 1
-    }
-    return nil
-}
-func (l *Lexer) AddNamedExpr(name, value string) {
+func (l *Lexer) AddSourceNamed(name, value string) {
     l.Sources = append(l.Sources, Source{
         Name:  name,
         Chars: []rune(value),
@@ -154,51 +139,88 @@ func (l *Lexer) AddNamedExpr(name, value string) {
         l.Cursor.Source      = name
         l.Cursor.Line        = 1
         l.Cursor.Column      = 1
+        l.TokenLoc           = l.Cursor
     }
 }
-func (loc *Location) PeekChar(l *Lexer) (ch rune, ok bool) {
-    if l.Cursor.SourceIndex == -1 { return }
-    if l.Cursor.SourceIndex >= len(l.Sources) { return }
-    Chars := l.Sources[loc.SourceIndex].Chars
-    if l.Cursor.Raw >= len(Chars) { return }
-    return Chars[loc.Raw], true
+func (l *Lexer) AddSourceFile(src string) error {
+    bytes, err := os.ReadFile(src)
+    if err != nil { return err }
+    l.AddSourceNamed(src, string(bytes))
+    return nil
 }
-func (loc *Location) SkipChar(l *Lexer, ch rune) (rest bool) {
+func (l *Lexer) TokenStr() string {
+    saved    := l.Cursor
+    locStart := l.TokenLoc
+    l.Cursor  = locStart
+    if !l.ParseToken() {
+        l.Cursor = saved
+        return ""
+    }
+    locEnd  := l.Cursor
+    l.Cursor = saved
+    if locStart.SourceIndex == -1 || locStart.SourceIndex >= len(l.Sources) { return "" }
+    if locStart.SourceIndex != locEnd.SourceIndex { return "" }
+    if locStart.Raw > locEnd.Raw { return "" }
+    Chars := l.Sources[locStart.SourceIndex].Chars
+    start := locStart.Raw
+    end   := min(locEnd.Raw, len(Chars))
+    return string(Chars[start:end])
+}
+type ReadState uint8
+const (
+    ReadNone ReadState = iota // nothing available to read
+    ReadOk                    // successful read on the same source
+    ReadEOF                   // successful read + switch to new source
+)
+func (loc *Location) PeekChar(l *Lexer) (ch rune, state ReadState) {
+    if loc.SourceIndex == -1 { return 0, ReadNone }
+    if loc.SourceIndex >= len(l.Sources) { return 0, ReadNone }
+    Chars := l.Sources[loc.SourceIndex].Chars
+    if loc.Raw >= len(Chars) {
+        if loc.SourceIndex + 1 >= len(l.Sources) { return 0, ReadNone }
+        return 0, ReadEOF
+    }
+    return Chars[loc.Raw], ReadOk
+}
+func (loc *Location) SkipChar(l *Lexer, ch rune) (state ReadState) {
     Chars := l.Sources[loc.SourceIndex].Chars
     if loc.Raw < len(Chars) {
-        if ch == '\n' {
-            loc.Line   += 1
-            loc.Column  = 1
-        } else { loc.Column += 1 }
         loc.Raw  += 1
     }
-    if loc.Raw >= len(Chars) {
-        if l.Cursor.SourceIndex + 1 >= len(l.Sources) { return }
-        l.Cursor.SourceIndex += 1
-        l.Cursor.Source = l.Sources[l.Cursor.SourceIndex].Name
-        l.Cursor.Line   = 1
-        l.Cursor.Column = 1
-        l.Cursor.Raw    = 0
-        l.NextFile = true
-        return true
+    l.NextFile = loc.Raw >= len(Chars)
+    if !l.NextFile {
+        if ch == '\n' {
+            loc.Line   += 1
+            loc.Column  = 0
+        }
+        loc.Column += 1
+        return ReadOk
     }
-    l.NextFile = false
-    return true
+    if loc.SourceIndex + 1 >= len(l.Sources) { return ReadNone }
+    loc.SourceIndex += 1
+    loc.Source = l.Sources[loc.SourceIndex].Name
+    loc.Line   = 1
+    loc.Column = 1
+    loc.Raw    = 0
+    return ReadEOF
 }
-func (loc *Location) GetChar(l *Lexer) (ch rune, ok bool) {
-    ch, ok = loc.PeekChar(l)
-    if !ok { return }
-    loc.SkipChar(l, ch)
+func (loc *Location) GetChar(l *Lexer) (ch rune, state ReadState) {
+    ch, state = loc.PeekChar(l)
+    if state == ReadNone { return }
+    state = loc.SkipChar(l, ch)
     return
 }
-func (l *Lexer) SkipSpaces() (ok bool) {
+func (l *Lexer) SkipSpaces(skipSources bool) (state ReadState) {
+    var ch rune
     for {
-        ch, ok := l.Cursor.PeekChar(l)
-        if !ok { break }
-        if !unicode.IsSpace(ch) { return true }
-        l.Cursor.SkipChar(l, ch)
+        ch, state = l.Cursor.PeekChar(l)
+        switch state {
+        case ReadNone: return
+        case ReadOk:   if !unicode.IsSpace(ch) { return ReadOk }
+        }
+        state = l.Cursor.SkipChar(l, ch)
+        if state == ReadEOF && !skipSources { return }
     }
-    return
 }
 func (l *Lexer) SetChToken(ch rune, kind TokenType) {
     l.Cursor.SkipChar(l, ch)
@@ -206,7 +228,7 @@ func (l *Lexer) SetChToken(ch rune, kind TokenType) {
     l.Char = ch
 }
 func (l *Lexer) SetErr(err error) {
-    l.Type = TokenError
+    l.Type   = TokenError
     l.Err    = err
     l.ErrLoc = l.TokenLoc
 }
@@ -222,17 +244,17 @@ func (l *Lexer) ParseNumber() bool {
     var err error
     numStr := ""
     
-    ch, ok := l.Cursor.GetChar(l)
+    ch, state := l.Cursor.GetChar(l)
     isNegative := ch == '-'
     isFloating := ch == '.'
     
-    if !ok { goto restore }
+    if state == ReadNone { goto restore }
     if unicode.IsDigit(ch) {
         beforeFloat = append(beforeFloat, ch)
     } else if !isNegative && !isFloating { goto restore }
     for {
-        ch, ok = l.Cursor.PeekChar(l)
-        if !ok { break }
+        ch, state = l.Cursor.PeekChar(l)
+        if state != ReadOk { break }
         if ch == '.' {
             if isFloating { goto restore }
             isFloating = true
@@ -244,8 +266,7 @@ func (l *Lexer) ParseNumber() bool {
                 beforeFloat = append(beforeFloat, ch)
             }
         }
-        l.Cursor.SkipChar(l, ch)
-        if l.NextFile { break }
+        if l.Cursor.SkipChar(l, ch) == ReadEOF { break }
     }
     if isFloating && len(afterFloat) == 0 && len(beforeFloat) == 0 {
         goto restore
@@ -273,6 +294,7 @@ func (l *Lexer) ParseNumber() bool {
     }
     if err != nil {
         l.SetErr(err)
+        goto restore
     }
     return true
 restore:
@@ -281,17 +303,16 @@ restore:
 }
 func (l *Lexer) ParseId() bool {
     saved := l.Cursor
-    ch, ok := l.Cursor.PeekChar(l)
     var chars []rune
-    if !ok { goto restore }
+    ch, state := l.Cursor.PeekChar(l)
+    if state != ReadOk { goto restore }
     if !IsIdFirst(ch) { goto restore }
     for {
-        ch, ok := l.Cursor.PeekChar(l)
-        if !ok { break }
+        ch, state = l.Cursor.PeekChar(l)
+        if state != ReadOk { break }
         if !IsId(ch) { break }
         chars = append(chars, ch)
-        l.Cursor.SkipChar(l, ch)
-        if l.NextFile { break }
+        if l.Cursor.SkipChar(l, ch) == ReadEOF { break }
     }
     if len(chars) == 0 { goto restore }
     l.Type = TokenId
@@ -305,8 +326,8 @@ func (l *Lexer) Loc() string {
     return l.TokenLoc.Loc()
 }
 func (l *Lexer) ParseToken() bool {
-    ok := l.SkipSpaces()
-    if !ok { return false }
+    state := l.SkipSpaces(true)
+    if state != ReadOk { return false }
     l.TokenLoc = l.Cursor
     ch, _ := l.Cursor.PeekChar(l)
     switch ch {
@@ -332,22 +353,22 @@ func (l *Lexer) ParseToken() bool {
         l.SetChToken(ch, TokenComma)
         return true
     case '"':
-        l.Cursor.SkipChar(l, ch)
-        if l.NextFile {
+        if l.Cursor.SkipChar(l, ch) == ReadEOF {
             l.SetErr(fmt.Errorf("unclosed string literal"))
             return true
         }
         var chars []rune
         escaping := false
         for {
-            ch, ok = l.Cursor.PeekChar(l)
-            if !ok {
+            var state ReadState
+            ch, state = l.Cursor.PeekChar(l)
+            if state != ReadOk {
                 l.SetErr(fmt.Errorf("unclosed string literal"))
                 return true
             }
-            l.Cursor.SkipChar(l, ch)
+            state = l.Cursor.SkipChar(l, ch)
             if !escaping && ch == '"' { break }
-            if ch == '\n' || l.NextFile {
+            if ch == '\n' || state == ReadEOF {
                 l.SetErr(fmt.Errorf("unclosed string literal"))
                 return true
             }
