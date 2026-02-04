@@ -63,6 +63,7 @@ const (
     ExprStr
     ExprInt
     ExprDouble
+    ExprBool
     ExprLet
 )
 func (t ExprKind) Str() string {
@@ -74,6 +75,7 @@ func (t ExprKind) Str() string {
     case ExprStr:    return "str"
     case ExprInt:    return "int"
     case ExprDouble: return "double"
+    case ExprBool:   return "bool"
     case ExprLet:    return "let-binding"
     }
     return "unknown"
@@ -86,6 +88,7 @@ func Str2ExprKind(kind string) ExprKind {
     case "str":      return ExprStr
     case "int":      return ExprInt
     case "double":   return ExprDouble
+    case "bool":     return ExprBool
     }
     return ExprNone
 }
@@ -95,6 +98,7 @@ func Token2ExprKind(t lexer.TokenType) ExprKind {
         case lexer.TokenStr:    return ExprStr
         case lexer.TokenInt:    return ExprInt
         case lexer.TokenDouble: return ExprDouble
+        case lexer.TokenBool:   return ExprBool
     }
     return ExprNone
 }
@@ -105,6 +109,7 @@ type Expr struct {
     Str    string
     Int    int64
     Double float64
+    Bool   bool
     
     Func   Function
     Args   []Expr
@@ -123,6 +128,7 @@ func (p *Parser) Token2Expr(gs *GospState, Type lexer.TokenType) (Expr, bool) {
         case ExprStr:    expr.Str    = p.Str
         case ExprInt:    expr.Int    = p.Int
         case ExprDouble: expr.Double = p.Double
+        case ExprBool:   expr.Bool   = p.Bool
         default: log.Unreachable("unexpected expression type: %s", expr.Kind.Str())
     }
     return expr, true
@@ -145,7 +151,8 @@ func (expr *Expr) GetExprType() ExprType {
     case ExprId:     fallthrough
     case ExprStr:    fallthrough
     case ExprInt:    fallthrough
-    case ExprDouble: break
+    case ExprDouble: fallthrough
+    case ExprBool:   break
     case ExprLet:
         if expr.LetBody != nil {
             return expr.LetBody.GetExprType()
@@ -166,7 +173,8 @@ func (expr *Expr) Eval(gs *GospState) Expr {
     case ExprNone:   fallthrough
     case ExprStr:    fallthrough
     case ExprInt:    fallthrough
-    case ExprDouble: break
+    case ExprDouble: fallthrough
+    case ExprBool:   break
     case ExprId:
         for i := 0; i <  len(gs.Bindings); i++ {
             if gs.Bindings[i].Id == expr.Id {
@@ -208,6 +216,9 @@ func (expr *Expr) ToStr(gs *GospState) string {
         return fmt.Sprintf("%d", rexpr.Int)
     case ExprDouble:
         return fmt.Sprintf("%f", rexpr.Double)
+    case ExprBool:
+        if rexpr.Bool { return "true" }
+        return "false"
     default: log.Unreachable("unknown expr type: %s", rexpr.Kind.Str())
     }
     return ""
@@ -329,6 +340,81 @@ func GospInit() GospState {
                         outs = append(outs, Func.Impl(gs, []Expr{ins[i]}))
                     }
                     return Expr{Kind: ExprList, List: outs}
+                },
+            },
+            Function{
+                Id: "head",
+                Type: FuncType{
+                    Types: []ExprType{{Kind: ExprList}},
+                    RType: &ExprType{Kind: ExprNone}, // placeholder
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    lst := args[0].Eval(gs)
+                    if lst.Kind != ExprList || len(lst.List) == 0 {
+                        return Expr{Kind: ExprNone}
+                    }
+                    return lst.List[0].Eval(gs)
+                },
+            },
+            Function{
+                Id: "tail",
+                Type: FuncType{
+                    Types: []ExprType{{Kind: ExprList}},
+                    RType: &ExprType{Kind: ExprList},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    lst := args[0].Eval(gs)
+                    if lst.Kind != ExprList || len(lst.List) == 0 {
+                        return Expr{Kind: ExprList, List: []Expr{}}
+                    }
+                    out := make([]Expr, len(lst.List)-1)
+                    copy(out, lst.List[1:])
+                    return Expr{Kind: ExprList, List: out}
+                },
+            },
+            Function{
+                Id: "<",
+                Type: FuncType{
+                    Types: []ExprType{
+                        ExprType{Kind: ExprDouble},
+                        ExprType{Kind: ExprDouble},
+                    },
+                    RType: &ExprType{Kind: ExprBool},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    a := args[0].Eval(gs).Double
+                    b := args[1].Eval(gs).Double
+                    return Expr{Kind: ExprBool, Bool: a < b}
+                },
+            },
+            Function{
+                Id: ">",
+                Type: FuncType{
+                    Types: []ExprType{
+                        ExprType{Kind: ExprDouble},
+                        ExprType{Kind: ExprDouble},
+                    },
+                    RType: &ExprType{Kind: ExprBool},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    a := args[0].Eval(gs).Double
+                    b := args[1].Eval(gs).Double
+                    return Expr{Kind: ExprBool, Bool: a > b}
+                },
+            },
+            Function{
+                Id: "=",
+                Type: FuncType{
+                    Types: []ExprType{
+                        ExprType{Kind: ExprDouble},
+                        ExprType{Kind: ExprDouble},
+                    },
+                    RType: &ExprType{Kind: ExprBool},
+                },
+                Impl: func(gs *GospState, args []Expr) Expr {
+                    a := args[0].Eval(gs).Double
+                    b := args[1].Eval(gs).Double
+                    return Expr{Kind: ExprBool, Bool: a == b}
                 },
             },
         },
@@ -697,6 +783,23 @@ func (p *Parser) ParseFunc(gs *GospState) (expr Expr, ok bool) {
     ok = p.ParseAndExpect(lexer.TokenCParen)
     if !ok {
         goto restore
+    }
+    // TODO: add generics, remove this
+    if expr.Func.Id == "head" && len(expr.Args) == 1 {
+        at := expr.Args[0].GetExprType().SimpType()
+        if at.Kind == ExprList && at.List != nil {
+            rt := at.List.SimpType()
+            expr.Func.Type.RType = &rt
+        } else {
+            none := ExprType{Kind: ExprNone}
+            expr.Func.Type.RType = &none
+        }
+    }
+    if expr.Func.Id == "tail" && len(expr.Args) == 1 {
+        at := expr.Args[0].GetExprType().SimpType()
+        if at.Kind == ExprList {
+            expr.Func.Type.RType = &at // tail type <=> return type
+        }
     }
     return
 restore:
