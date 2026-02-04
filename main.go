@@ -29,7 +29,7 @@ func initDB(ctx context.Context) (server.Storage, func(context.Context) error){
 }
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
     db, closeFn := initDB(ctx)
@@ -45,6 +45,7 @@ func main() {
 	    CookieName: "authKey",
         AuthTTL:    30 * 24 * time.Hour,
 	    Addr:       ":8000",
+        States: make(map[string]*server.InterpSession),
     }
 
 	mux := http.NewServeMux()
@@ -54,6 +55,8 @@ func main() {
 
 	mux.HandleFunc("/api/logout", sv.RequireAuth(sv.HandleLogout))
 	mux.HandleFunc("/api/history", sv.RequireAuth(sv.HandleHistory))
+
+    mux.Handle("/", http.FileServer(http.Dir("./public")))
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

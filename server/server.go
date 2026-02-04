@@ -5,16 +5,52 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"sync"
     
     "github.com/Fipaan/gosp/parser"
 )
+
+type InterpSession struct {
+    mu sync.Mutex
+    gs parser.GospState
+}
 
 type Server struct {
     DB          *Storage
     CookieName   string
     AuthTTL      time.Duration
     Addr         string
+
+    stateMu sync.Mutex
+    States  map[string]*InterpSession // key: authKey
 }
+
+// sessions
+
+func (sv *Server) getInterpSession(authKey string) *InterpSession {
+    sv.stateMu.Lock()
+    defer sv.stateMu.Unlock()
+
+    if sv.States == nil {
+        sv.States = make(map[string]*InterpSession)
+    }
+    s := sv.States[authKey]
+    if s == nil {
+        s = &InterpSession{gs: parser.GospInit()}
+        sv.States[authKey] = s
+    }
+    return s
+}
+
+func (sv *Server) dropInterpSession(authKey string) {
+    sv.stateMu.Lock()
+    defer sv.stateMu.Unlock()
+    if sv.States != nil {
+        delete(sv.States, authKey)
+    }
+}
+
+// auth
 
 func (sv *Server) ExtractAuthKey(r *http.Request) string {
 	if c, err := r.Cookie(sv.CookieName); err == nil && c.Value != "" {
@@ -137,7 +173,7 @@ func (sv *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sv.SetAuthCookie(w, authKey, exp)
-	w.Header().Set("X-Auth-Key", authKey) // optional for non-browser clients
+	w.Header().Set("X-Auth-Key", authKey)
 
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
 }
@@ -192,15 +228,13 @@ func (sv *Server) HandleHistory(w http.ResponseWriter, r *http.Request, sess Ses
 	ctx, cancel := sv.WithTimeout(r)
 	defer cancel()
 
-	items, err := sv.DB.GetHistory(ctx, sess.Username, 50) // placeholder limit
+	items, err := sv.DB.GetHistory(ctx, sess.Username, 50)
 	if err != nil {
 		WriteAPIError(w, http.StatusInternalServerError, nil, "database error")
 		return
 	}
 
-	// If you must return ONLY {"status":"OK"}, remove "items".
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"status": "OK",
 		"items":  items,
 	})
 }
@@ -218,31 +252,50 @@ func (sv *Server) HandleExpr(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// authKey optional here
 	var username string
-	if ak := sv.ExtractAuthKey(r); ak != "" {
+    authKey := sv.ExtractAuthKey(r)
+    if authKey != "" {
 		ctx, cancel := sv.WithTimeout(r)
 		defer cancel()
 
-		if sess, ok, err := sv.DB.TouchSession(ctx, ak); err == nil && ok {
+		if sess, ok, err := sv.DB.TouchSession(ctx, authKey); err == nil && ok {
 			username = sess.Username
 		}
 	}
-    
-    p := parser.ParserInit()
-    p.AddNamedExpr("post-request", req.Expr)
-    expr, ok := p.ParseExpr()
-    if !ok {
-		WriteAPIError(w, http.StatusBadRequest, &p.ErrLoc, p.Err.Error())
-		return
-    }
-    res := expr.Eval()
 
-	if username != "" {
-		ctx, cancel := sv.WithTimeout(r)
+    req.Expr = strings.TrimSpace(req.Expr)
+    if req.Expr == "" {
+        WriteAPIError(w, http.StatusBadRequest, nil, "expr is required")
+        return
+    }
+    
+    var gs *parser.GospState
+    var isess *InterpSession
+
+    if username != "" {
+        isess = sv.getInterpSession(authKey)
+        isess.mu.Lock()
+        defer isess.mu.Unlock()
+        gs = &isess.gs
+    } else {
+        tmp := parser.GospInit()
+        gs = &tmp
+    }
+
+    p := parser.ParserInit()
+    p.AddSourceNamed("post-request", req.Expr)
+
+    res, firstLoc := EvalTS(&p, gs)
+    if firstLoc != nil {
+    	WriteAPIError(w, http.StatusBadRequest, firstLoc, "%s", res)
+    	return
+    }
+
+    if username != "" {
+        ctx, cancel := sv.WithTimeout(r)
 		defer cancel()
 		sv.DB.AppendHistory(ctx, username, req.Expr, res)
-	}
+    }
 
 	WriteJSON(w, http.StatusOK, map[string]string{"result": res})
 }
