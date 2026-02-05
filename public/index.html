@@ -76,19 +76,12 @@
 
 <h1>GOSP Web REPL</h1>
 
-<section id="auth">
-  <h2>Session</h2>
-  <button id="loginBtn">Login (anonymous)</button>
-  <button id="logoutBtn">Logout</button>
-  <div id="authStatus">Not authenticated</div>
-</section>
-
 <section id="repl">
   <h2>REPL</h2>
 
-  <textarea id="codeInput" placeholder="Enter one or multiple expressions...">
-(+ 1 2)
-(* 3 4)
+  <textarea id="codeInput" placeholder="Enter code using defun, let, if, and lists...">
+(defun inc (x) (+ x 1))
+(inc 5)
   </textarea>
 
   <br>
@@ -103,12 +96,6 @@
 </section>
 
 <section>
-  <h2>Saved Session History</h2>
-  <button id="loadHistoryBtn">Load from server</button>
-  <pre id="serverHistory">No server history loaded.</pre>
-</section>
-
-<section>
   <h2>Function Reference</h2>
 
   <h3>Built-in functions</h3>
@@ -117,12 +104,13 @@
     (- a b)  — subtraction<br>
     (* a b)  — multiplication<br>
     (/ a b)  — division<br>
-    (cons a b), (car x), (cdr x)
+    (cons a b), (car x), (cdr x)<br>
+    (if cond then else), (let ((var val)) ... )
   </div>
 
   <h3>User-defined functions</h3>
   <div class="function-block">
-    (define inc (lambda (x) (+ x 1)))<br>
+    (defun inc (x) (+ x 1))<br>
     Defines a function that increments x
   </div>
 </section>
