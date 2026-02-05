@@ -4,115 +4,40 @@
   <meta charset="UTF-8">
   <title>GOSP Web REPL</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f5f5;
-      padding: 30px;
-    }
-
-    h1, h2 {
-      margin-top: 30px;
-    }
-
-    textarea {
-      width: 100%;
-      height: 120px;
-      font-family: monospace;
-      font-size: 15px;
-    }
-
-    button {
-      margin: 5px 5px 5px 0;
-      padding: 8px 15px;
-      cursor: pointer;
-    }
-
-    pre {
-      background: #222;
-      color: #0f0;
-      padding: 12px;
-      white-space: pre-wrap;
-    }
-
-    section {
-      background: #fff;
-      padding: 20px;
-      margin-top: 25px;
-      border-radius: 6px;
-    }
-
-    #history {
-      max-height: 250px;
-      overflow-y: auto;
-    }
-
-    .history-item {
-      background: #333;
-      color: #fff;
-      padding: 10px;
-      margin-bottom: 10px;
-      border-radius: 5px;
-      font-family: monospace;
-    }
-
-    .history-command {
-      color: #6ab0ff;
-    }
-
-    .history-result {
-      color: #7CFC00;
-      margin-top: 5px;
-    }
-
-    .function-block {
-      background: #eee;
-      padding: 10px;
-      margin-bottom: 10px;
-      font-family: monospace;
-    }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+    h1, h2 { margin-top: 20px; }
+    textarea { width: 100%; height: 100px; font-family: monospace; font-size: 14px; }
+    input, button { padding: 8px; margin: 5px 0; }
+    pre { background: #222; color: #0f0; padding: 10px; white-space: pre-wrap; }
+    section { background: #fff; padding: 15px; margin-top: 20px; border-radius: 6px; }
+    #history { max-height: 250px; overflow-y: auto; }
+    .history-item { background: #333; color: #fff; padding: 8px; margin-bottom: 8px; border-radius: 4px; font-family: monospace; }
   </style>
 </head>
 <body>
 
 <h1>GOSP Web REPL</h1>
 
-<section id="repl">
+<section id="auth">
+  <h2>Authentication</h2>
+  <input type="text" id="username" placeholder="Username">
+  <input type="password" id="password" placeholder="Password"><br>
+  <button id="registerBtn">Register</button>
+  <button id="loginBtn">Login</button>
+  <button id="logoutBtn" style="display:none;">Logout</button>
+  <pre id="authStatus"></pre>
+</section>
+
+<section id="repl" style="display:none;">
   <h2>REPL</h2>
-
-  <textarea id="codeInput" placeholder="Enter code using defun, let, if, and lists...">
-(defun inc (x) (+ x 1))
-(inc 5)
-  </textarea>
-
-  <br>
+  <textarea id="codeInput" placeholder="Enter code using defun, let, if, lists..."></textarea><br>
   <button id="runBtn">Run</button>
-
   <pre id="output">Output will appear here...</pre>
 </section>
 
-<section>
+<section id="historySection" style="display:none;">
   <h2>Command History</h2>
-  <div id="history">No commands yet.</div>
-</section>
-
-<section>
-  <h2>Function Reference</h2>
-
-  <h3>Built-in functions</h3>
-  <div class="function-block">
-    (+ a b)  — addition<br>
-    (- a b)  — subtraction<br>
-    (* a b)  — multiplication<br>
-    (/ a b)  — division<br>
-    (cons a b), (car x), (cdr x)<br>
-    (if cond then else), (let ((var val)) ... )
-  </div>
-
-  <h3>User-defined functions</h3>
-  <div class="function-block">
-    (defun inc (x) (+ x 1))<br>
-    Defines a function that increments x
-  </div>
+  <div id="history">No history yet.</div>
 </section>
 
 <script src="script.js"></script>
