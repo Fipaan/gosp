@@ -1,47 +1,110 @@
+const usernameEl = document.getElementById("username");
+const passwordEl = document.getElementById("password");
+const authStatus = document.getElementById("authStatus");
+const registerBtn = document.getElementById("registerBtn");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+
+const replSection = document.getElementById("repl");
+const codeInput = document.getElementById("codeInput");
+const runBtn = document.getElementById("runBtn");
 const output = document.getElementById("output");
+
+const historySection = document.getElementById("historySection");
 const historyEl = document.getElementById("history");
 
-document.getElementById("runBtn").addEventListener("click", async () => {
-  const code = document.getElementById("codeInput").value.trim();
-  if (!code) return;
+let authKey = null;
 
-  output.textContent = "Running...";
+// --- Utility to set auth cookie header ---
+function authHeaders() {
+    return authKey ? { "Authorization": "Bearer " + authKey } : {};
+}
 
-  try {
-    const response = await fetch("/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code })
+// --- Register ---
+registerBtn.addEventListener("click", async () => {
+    const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: usernameEl.value, password: passwordEl.value })
     });
-
-    const data = await response.json();
-    const resultText = data.error ? `Error: ${data.error}` : `Result: ${data.result}`;
-
-    output.textContent = resultText;
-    addHistoryItem(code, resultText);
-
-  } catch (err) {
-    const msg = `Fetch error: ${err.message}`;
-    output.textContent = msg;
-    addHistoryItem(code, msg);
-  }
+    const data = await res.json();
+    if (res.ok) {
+        authStatus.textContent = "Registered successfully. Please login.";
+    } else {
+        authStatus.textContent = data.message;
+    }
 });
 
-function addHistoryItem(command, result) {
-  const item = document.createElement("div");
-  item.className = "history-item";
+// --- Login ---
+loginBtn.addEventListener("click", async () => {
+    const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: usernameEl.value, password: passwordEl.value })
+    });
+    const data = await res.json();
+    if (res.ok) {
+        authKey = data.authKey;
+        authStatus.textContent = "Logged in successfully!";
+        logoutBtn.style.display = "inline-block";
+        replSection.style.display = "block";
+        historySection.style.display = "block";
+        loadHistory();
+    } else {
+        authStatus.textContent = data.message;
+    }
+});
 
-  const cmd = document.createElement("div");
-  cmd.className = "history-command";
-  cmd.textContent = command;
+// --- Logout ---
+logoutBtn.addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST", headers: authHeaders() });
+    authKey = null;
+    authStatus.textContent = "Logged out.";
+    logoutBtn.style.display = "none";
+    replSection.style.display = "none";
+    historySection.style.display = "none";
+    historyEl.innerHTML = "";
+});
 
-  const res = document.createElement("div");
-  res.className = "history-result";
-  res.textContent = ">> " + result;
+// --- Run REPL code ---
+runBtn.addEventListener("click", async () => {
+    const expr = codeInput.value.trim();
+    if (!expr) return;
+    const res = await fetch("/api/expr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ expr })
+    });
+    const data = await res.json();
+    if (res.ok) {
+        output.textContent = data.result;
+        appendHistory(expr, data.result);
+    } else {
+        output.textContent = data.message;
+    }
+});
 
-  item.appendChild(cmd);
-  item.appendChild(res);
-  historyEl.appendChild(item);
+// --- Load history ---
+async function loadHistory() {
+    const res = await fetch("/api/history", {
+        method: "GET",
+        headers: authHeaders()
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    historyEl.innerHTML = "";
+    data.history.forEach(item => {
+        const div = document.createElement("div");
+        div.className = "history-item";
+        div.textContent = `[${new Date(item.at).toLocaleString()}] ${item.expr} => ${item.result}`;
+        historyEl.appendChild(div);
+    });
+}
 
-  historyEl.scrollTop = historyEl.scrollHeight;
+// --- Append single item to history ---
+function appendHistory(expr, result) {
+    const div = document.createElement("div");
+    div.className = "history-item";
+    div.textContent = `[${new Date().toLocaleString()}] ${expr} => ${result}`;
+    historyEl.prepend(div);
 }
