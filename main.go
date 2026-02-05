@@ -1,137 +1,74 @@
 package main
 
 import (
-    "github.com/Fipaan/gosp/log"
-    "github.com/Fipaan/gosp/utils"
-    "fmt"
-    "flag"
-    "os"
-	"encoding/json"
+    "context"
 	"net/http"
+    "os"
+	"time"
+
+    "github.com/Fipaan/gosp/server"
+    "github.com/Fipaan/gosp/log"
 )
-const (
-    NUMBER_1 = 1
-    NUMBER_2 = 2.0
-)
 
-func parseMain() {
-    var depth utils.Stack[TokenType]
-    const filename string = "main.go"
-    var withPrefix bool   = false
-    l := LexerInit()
-    err := l.AddSourceFile(filename)
-    if err != nil {
-        log.Abortf("Couldn't read %s: %s", filename, err.Error())
-    }
-    for l.ParseToken() {
-        if l.Type == TokenNone { return }
-        tokenStr := ""
-        withPrefix = true
-        switch l.Type {
-        case TokenOParen: fallthrough
-        case TokenOCurly: fallthrough
-        case TokenOBracket:
-            withPrefix = false
-            depth.Push(l.Type)
-            tokenStr = fmt.Sprintf("%c", l.Char)
-        case TokenCParen: fallthrough
-        case TokenCCurly: fallthrough
-        case TokenCBracket:
-            t, ok := depth.Pop()
-            if !ok || t != l.Type.CToO() {
-                log.Abortf("%s: unmatched paren", l.Loc())
-            }
-            withPrefix = false
-            tokenStr = fmt.Sprintf("%c", l.Char)
-        case TokenComma:
-            withPrefix = false
-            tokenStr = fmt.Sprintf("%c", l.Char)
-        case TokenStr:
-            tokenStr = fmt.Sprintf("String(\"%s\")", log.Str2Printable(l.Str))
-        case TokenId:
-            tokenStr = fmt.Sprintf("Id(%s)",         l.Str)
-        case TokenInt:
-            tokenStr = fmt.Sprintf("Int(%d)",        l.Int)
-        case TokenDouble:
-            tokenStr = fmt.Sprintf("Double(%f)",     l.Double)
-        case TokenError:
-            log.Abortf("%s: %s", l.Loc(), l.Err.Error())
-        case TokenNone: fallthrough
-        default: log.Unreachable("unknown TokenType")
-        }
-        if withPrefix {
-            log.Printf("\r\n%*s", len(depth)*2, "")
-        }
-        log.Printf("%s", tokenStr)
-    }
-    if !withPrefix { log.Printf("\r\n") }
-    log.Infof("Successfully read %s!", filename)
+func ensureEnv(name string) string {
+    val := os.Getenv(name)
+    if val == "" { log.Abortf("%s was not set", name) }
+    return val
 }
 
-func fileExample() {
-    _filename := flag.String("filename", "main.go", "path to file to be parsed")
-    flag.Parse()
-    filename := *_filename
-    l := LexerInit()
-    err := l.AddSourceFile(filename)
-    if err != nil {
-        log.Abortf("Couldn't read %s: %s", filename, err.Error())
-    }
-    var expr Expr
-    expr, err = l.ParseExpr()
-    if err != nil {
-        log.Errorf("%s", err.Error())
-        os.Exit(1)
-    }
-    log.Printf("%s", expr.Eval())
-}
+func initDB(ctx context.Context) (server.Storage, func(context.Context) error){
+    mongoURI := ensureEnv("MONGO_URI")
+	dbName   := ensureEnv("MONGO_DB")
+    secret   := ensureEnv("AUTH_HMAC_SECRET")
 
-type ExprRequest struct {
-	Expr string `json:"expr"`
-}
-
-type ExprResponse struct {
-	Result string `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
-}
-
-func exprHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+	db, closeFn, err := server.NewStore(ctx, mongoURI, dbName, []byte(secret))
+	if err != nil {
+        log.Abortf("Couldn't initialize db: %s", err.Error())
 	}
-
-	var req ExprRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, ExprResponse{Error: "invalid JSON"})
-		return
-	}
-
-	if req.Expr == "" {
-		writeJSON(w, ExprResponse{Error: "expr is required"})
-		return
-	}
-    
-    l := LexerInit()
-    l.AddNamedExpr("post-request", req.Expr)
-    expr, err := l.ParseExpr()
-    if err != nil {
-		writeJSON(w, ExprResponse{Error: err.Error()})
-		return
-    }
-	writeJSON(w, ExprResponse{Result: expr.Eval()})
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+    return db, closeFn
 }
 
 func main() {
-	http.HandleFunc("/api/expr", exprHandler)
-    http.Handle("/", http.FileServer(http.Dir("public")))
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-    const PORT = ":8000"
-	log.Infof("listening on %s", PORT)
-	http.ListenAndServe(PORT, nil)
+    db, closeFn := initDB(ctx)
+	
+	defer func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer ccancel()
+		_ = closeFn(cctx)
+	}()
+
+	sv := &server.Server{
+        DB:         &db,
+	    CookieName: "authKey",
+        AuthTTL:    30 * 24 * time.Hour,
+	    Addr:       ":8000",
+        States: make(map[string]*server.InterpSession),
+    }
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/register", sv.HandleRegister)
+	mux.HandleFunc("/api/login", sv.HandleLogin)
+	mux.HandleFunc("/api/expr", sv.HandleExpr)
+
+	mux.HandleFunc("/api/logout", sv.RequireAuth(sv.HandleLogout))
+	mux.HandleFunc("/api/history", sv.RequireAuth(sv.HandleHistory))
+
+    mux.Handle("/", http.FileServer(http.Dir("./public")))
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				server.WriteAPIError(w, http.StatusInternalServerError, nil, "internal server error")
+			}
+			log.Printf("[%s] %s %s\n", time.Now().Format(time.RFC3339),
+                      r.Method, r.URL.Path)
+		}()
+		mux.ServeHTTP(w, r)
+	})
+
+	log.Infof("Listening on %s", sv.Addr)
+	log.Abortf("%s", http.ListenAndServe(sv.Addr, handler))
 }

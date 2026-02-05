@@ -1,4 +1,4 @@
-package main
+package lexer
 
 import (
     "github.com/Fipaan/gosp/log"
@@ -28,13 +28,14 @@ func IsId(ch rune) bool {
 }
 
 type Location struct {
-    Source      string
-    Line        int
-    Column      int
+	Source string `json:"source"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
     
-    SourceIndex int
-    Raw         int
+    SourceIndex int `json:"-"`
+    Raw         int `json:"-"`
 }
+
 func (l *Location) Loc() string {
     return fmt.Sprintf("%s:%d:%d", l.Source, l.Line, l.Column)
 }
@@ -53,6 +54,7 @@ const (
     TokenComma
     TokenInt
     TokenDouble
+    TokenBool
     TokenError
 )
 func (t TokenType) OToC() TokenType {
@@ -96,6 +98,7 @@ func (t TokenType) Str() string {
     case TokenComma:    return ","
     case TokenInt:      return "int"
     case TokenDouble:   return "double"
+    case TokenBool:     return "bool"
     case TokenError:    return "error"
     }
     return "unknown"
@@ -111,11 +114,16 @@ type Lexer struct {
     Cursor   Location
     TokenLoc Location
     Type     TokenType
+    
     Str      string
     Int      int64
     Double   float64
     Char     rune
+    Bool     bool
+    
     Err      error
+    ErrLoc   Location
+    
     NextFile bool
 }
 func LexerInit() (l Lexer) {
@@ -124,22 +132,7 @@ func LexerInit() (l Lexer) {
     l.Type                 = TokenNone
     return
 }
-func (l *Lexer) AddSourceFile(src string) error {
-    bytes, err := os.ReadFile(src)
-    if err != nil { return err }
-    l.Sources = append(l.Sources, Source{
-        Name:  src,
-        Chars: []rune(string(bytes)),
-    })
-    if l.Cursor.SourceIndex == -1 {
-        l.Cursor.SourceIndex = 0
-        l.Cursor.Source      = src
-        l.Cursor.Line        = 1
-        l.Cursor.Column      = 1
-    }
-    return nil
-}
-func (l *Lexer) AddNamedExpr(name, value string) {
+func (l *Lexer) AddSourceNamed(name, value string) {
     l.Sources = append(l.Sources, Source{
         Name:  name,
         Chars: []rune(value),
@@ -149,81 +142,113 @@ func (l *Lexer) AddNamedExpr(name, value string) {
         l.Cursor.Source      = name
         l.Cursor.Line        = 1
         l.Cursor.Column      = 1
+        l.TokenLoc           = l.Cursor
     }
 }
-func (loc *Location) peekChar(l *Lexer) (ch rune, ok bool) {
-    if l.Cursor.SourceIndex == -1 { return }
-    if l.Cursor.SourceIndex >= len(l.Sources) { return }
-    Chars := l.Sources[loc.SourceIndex].Chars
-    if l.Cursor.Raw >= len(Chars) { return }
-    return Chars[loc.Raw], true
+func (l *Lexer) AddSourceFile(src string) error {
+    bytes, err := os.ReadFile(src)
+    if err != nil { return err }
+    l.AddSourceNamed(src, string(bytes))
+    return nil
 }
-func (loc *Location) skipChar(l *Lexer, ch rune) (rest bool) {
+func (l *Lexer) TokenStr(locStart, locEnd Location) string {
+    if locStart.SourceIndex == -1 || locStart.SourceIndex >= len(l.Sources) { return "" }
+    if locStart.SourceIndex != locEnd.SourceIndex { return "" }
+    if locStart.Raw > locEnd.Raw { return "" }
+    Chars := l.Sources[locStart.SourceIndex].Chars
+    start := locStart.Raw
+    end   := min(locEnd.Raw, len(Chars))
+    return string(Chars[start:end])
+}
+type ReadState uint8
+const (
+    ReadNone ReadState = iota // nothing available to read
+    ReadOk                    // successful read on the same source
+    ReadEOF                   // successful read + switch to new source
+)
+func (loc *Location) PeekChar(l *Lexer) (ch rune, state ReadState) {
+    if loc.SourceIndex == -1 { return 0, ReadNone }
+    if loc.SourceIndex >= len(l.Sources) { return 0, ReadNone }
+    Chars := l.Sources[loc.SourceIndex].Chars
+    if loc.Raw >= len(Chars) {
+        if loc.SourceIndex + 1 >= len(l.Sources) { return 0, ReadNone }
+        return 0, ReadEOF
+    }
+    return Chars[loc.Raw], ReadOk
+}
+func (loc *Location) SkipChar(l *Lexer, ch rune) (state ReadState) {
     Chars := l.Sources[loc.SourceIndex].Chars
     if loc.Raw < len(Chars) {
-        if ch == '\n' {
-            loc.Line   += 1
-            loc.Column  = 1
-        } else { loc.Column += 1 }
         loc.Raw  += 1
     }
-    if loc.Raw >= len(Chars) {
-        if l.Cursor.SourceIndex + 1 >= len(l.Sources) { return }
-        l.Cursor.SourceIndex += 1
-        l.Cursor.Source = l.Sources[l.Cursor.SourceIndex].Name
-        l.Cursor.Line   = 1
-        l.Cursor.Column = 1
-        l.Cursor.Raw    = 0
-        l.NextFile = true
-        return true
+    l.NextFile = loc.Raw >= len(Chars)
+    if !l.NextFile {
+        if ch == '\n' {
+            loc.Line   += 1
+            loc.Column  = 0
+        }
+        loc.Column += 1
+        return ReadOk
     }
-    l.NextFile = false
-    return true
+    if loc.SourceIndex + 1 >= len(l.Sources) { return ReadNone }
+    loc.SourceIndex += 1
+    loc.Source = l.Sources[loc.SourceIndex].Name
+    loc.Line   = 1
+    loc.Column = 1
+    loc.Raw    = 0
+    return ReadEOF
 }
-func (loc *Location) getChar(l *Lexer) (ch rune, ok bool) {
-    ch, ok = loc.peekChar(l)
-    if !ok { return }
-    loc.skipChar(l, ch)
+func (loc *Location) GetChar(l *Lexer) (ch rune, state ReadState) {
+    ch, state = loc.PeekChar(l)
+    if state == ReadNone { return }
+    state = loc.SkipChar(l, ch)
     return
 }
-func (l *Lexer) SkipSpaces() (ok bool) {
+func (l *Lexer) SkipSpaces(skipSources bool) (state ReadState) {
+    var ch rune
     for {
-        ch, ok := l.Cursor.peekChar(l)
-        if !ok { break }
-        if !unicode.IsSpace(ch) { return true }
-        l.Cursor.skipChar(l, ch)
+        ch, state = l.Cursor.PeekChar(l)
+        switch state {
+        case ReadNone: return
+        case ReadOk:   if !unicode.IsSpace(ch) { return ReadOk }
+        }
+        state = l.Cursor.SkipChar(l, ch)
+        if state == ReadEOF && !skipSources { return }
     }
-    return
 }
-func (l *Lexer) setChToken(ch rune, kind TokenType) {
-    l.Cursor.skipChar(l, ch)
+func (l *Lexer) SetChToken(ch rune, kind TokenType) {
+    l.Cursor.SkipChar(l, ch)
     l.Type = kind
     l.Char = ch
 }
-func (l *Lexer) unknownToken(ch rune) {
-    l.Cursor.skipChar(l, ch)
-    l.Type  = TokenError
-    Ch, _  := log.CharDesc(ch, false)
-    l.Err   = fmt.Errorf("%s does not start any known token", Ch)
+func (l *Lexer) SetErr(err error) {
+    l.Type   = TokenError
+    l.Err    = err
+    l.ErrLoc = l.TokenLoc
 }
-func (l *Lexer) parseNumber() bool {
+func (l *Lexer) UnknownToken(ch rune) {
+    l.Cursor.SkipChar(l, ch)
+    Ch, _  := log.CharDesc(ch, false)
+    l.SetErr(fmt.Errorf("%s does not start any known token", Ch))
+}
+func (l *Lexer) ParseNumber() bool {
     saved := l.Cursor
     var beforeFloat []rune
     var afterFloat []rune
     var err error
     numStr := ""
     
-    ch, ok := l.Cursor.getChar(l)
+    ch, state := l.Cursor.GetChar(l)
     isNegative := ch == '-'
     isFloating := ch == '.'
     
-    if !ok { goto restore }
+    if state == ReadNone { goto restore }
     if unicode.IsDigit(ch) {
         beforeFloat = append(beforeFloat, ch)
     } else if !isNegative && !isFloating { goto restore }
     for {
-        ch, ok = l.Cursor.peekChar(l)
-        if !ok { break }
+        ch, state = l.Cursor.PeekChar(l)
+        if state != ReadOk { break }
         if ch == '.' {
             if isFloating { goto restore }
             isFloating = true
@@ -235,8 +260,7 @@ func (l *Lexer) parseNumber() bool {
                 beforeFloat = append(beforeFloat, ch)
             }
         }
-        l.Cursor.skipChar(l, ch)
-        if l.NextFile { break }
+        if l.Cursor.SkipChar(l, ch) == ReadEOF { break }
     }
     if isFloating && len(afterFloat) == 0 && len(beforeFloat) == 0 {
         goto restore
@@ -263,31 +287,41 @@ func (l *Lexer) parseNumber() bool {
         l.Int, err = strconv.ParseInt(numStr, 10, 64)
     }
     if err != nil {
-        l.Type = TokenError
-        l.Err = err
+        l.SetErr(err)
+        goto restore
     }
     return true
 restore:
     l.Cursor = saved
     return false
 }
-func (l *Lexer) parseId() bool {
+func (l *Lexer) ParseId() bool {
     saved := l.Cursor
-    ch, ok := l.Cursor.peekChar(l)
     var chars []rune
-    if !ok { goto restore }
+    var val string
+    ch, state := l.Cursor.PeekChar(l)
+    if state != ReadOk { goto restore }
     if !IsIdFirst(ch) { goto restore }
     for {
-        ch, ok := l.Cursor.peekChar(l)
-        if !ok { break }
+        ch, state = l.Cursor.PeekChar(l)
+        if state != ReadOk { break }
         if !IsId(ch) { break }
         chars = append(chars, ch)
-        l.Cursor.skipChar(l, ch)
-        if l.NextFile { break }
+        if l.Cursor.SkipChar(l, ch) == ReadEOF { break }
     }
     if len(chars) == 0 { goto restore }
-    l.Type = TokenId
-    l.Str  = string(chars)
+    val = string(chars)
+    switch val {
+    case "true":
+        l.Type = TokenBool
+        l.Bool = true
+    case "false":
+        l.Type = TokenBool
+        l.Bool = false
+    default:
+        l.Type = TokenId
+        l.Str  = val
+    }
     return true
 restore:
     l.Cursor = saved
@@ -297,53 +331,50 @@ func (l *Lexer) Loc() string {
     return l.TokenLoc.Loc()
 }
 func (l *Lexer) ParseToken() bool {
-    ok := l.SkipSpaces()
-    if !ok { return false }
+    state := l.SkipSpaces(true)
+    if state != ReadOk { return false }
     l.TokenLoc = l.Cursor
-    ch, _ := l.Cursor.peekChar(l)
+    ch, _ := l.Cursor.PeekChar(l)
     switch ch {
     case '(':
-        l.setChToken(ch, TokenOParen)
+        l.SetChToken(ch, TokenOParen)
         return true
     case ')':
-        l.setChToken(ch, TokenCParen)
+        l.SetChToken(ch, TokenCParen)
         return true
     case '{':
-        l.setChToken(ch, TokenOCurly)
+        l.SetChToken(ch, TokenOCurly)
         return true
     case '}':
-        l.setChToken(ch, TokenCCurly)
+        l.SetChToken(ch, TokenCCurly)
         return true
     case '[':
-        l.setChToken(ch, TokenOBracket)
+        l.SetChToken(ch, TokenOBracket)
         return true
     case ']':
-        l.setChToken(ch, TokenCBracket)
+        l.SetChToken(ch, TokenCBracket)
         return true
     case ',':
-        l.setChToken(ch, TokenComma)
+        l.SetChToken(ch, TokenComma)
         return true
     case '"':
-        l.Cursor.skipChar(l, ch)
-        if l.NextFile {
-            l.Type  = TokenError
-            l.Err   = fmt.Errorf("unclosed string literal")
+        if l.Cursor.SkipChar(l, ch) == ReadEOF {
+            l.SetErr(fmt.Errorf("unclosed string literal"))
             return true
         }
         var chars []rune
         escaping := false
         for {
-            ch, ok = l.Cursor.peekChar(l)
-            if !ok {
-                l.Type  = TokenError
-                l.Err   = fmt.Errorf("unclosed string literal")
+            var state ReadState
+            ch, state = l.Cursor.PeekChar(l)
+            if state != ReadOk {
+                l.SetErr(fmt.Errorf("unclosed string literal"))
                 return true
             }
-            l.Cursor.skipChar(l, ch)
+            state = l.Cursor.SkipChar(l, ch)
             if !escaping && ch == '"' { break }
-            if ch == '\n' || l.NextFile {
-                l.Type  = TokenError
-                l.Err   = fmt.Errorf("unclosed string literal")
+            if ch == '\n' || state == ReadEOF {
+                l.SetErr(fmt.Errorf("unclosed string literal"))
                 return true
             }
             if escaping {
@@ -355,7 +386,7 @@ func (l *Lexer) ParseToken() bool {
                 default:
                     l.Type  = TokenError
                     Ch, _  := log.CharDesc(ch, false)
-                    l.Err   = fmt.Errorf("%s unknown escape character", Ch)
+                    l.SetErr(fmt.Errorf("%s unknown escape character", Ch))
                     return true
                 }
                 escaping = false
@@ -369,9 +400,9 @@ func (l *Lexer) ParseToken() bool {
         l.Str = string(chars)
         return true
     default:
-        if l.parseNumber() { return true }
-        if l.parseId()     { return true }
-        l.unknownToken(ch)
+        if l.ParseNumber() { return true }
+        if l.ParseId()     { return true }
+        l.UnknownToken(ch)
         return true
     }
     return false

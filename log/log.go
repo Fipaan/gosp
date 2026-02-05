@@ -156,22 +156,25 @@ func Printf(format string, args ...any) {
 func Escapedf(format string, args ...any) {
 	Printf(ESC_STR + format, args...)
 }
+func Eprintf(format string, args ...any) {
+	Fprintf(os.Stderr, -1, format, args...)
+}
 func Errorf(format string, args ...any) {
-	Fprintf(os.Stderr, -1, "ERROR: " + format + "\r\n", args...)
+	Fprintf(os.Stderr, -1, "ERROR: " + format + "\n", args...)
 }
 func Infof(format string, args ...any) {
-	Fprintf(os.Stdout, -1, "INFO: " + format + "\r\n", args...)
+	Fprintf(os.Stdout, -1, "INFO: " + format + "\n", args...)
 }
 func Debugf(format string, args ...any) {
 	if DEBUG {
-		Fprintf(os.Stdout, -1, "DEBUG: " + format + "\r\n", args...)
+		Fprintf(os.Stdout, -1, "DEBUG: " + format + "\n", args...)
 	}
 }
 func Abortf(format string, args ...any) {
 	abortf(1, format, args...)
 }
 func Todof(format string, args ...any) {
-	Fprintf(os.Stderr, 1, "TODO: " + format + "\r\n", args...)
+	Fprintf(os.Stderr, 1, "TODO: " + format + "\n", args...)
 	os.Exit(1)
 }
 func Unreachable(format string, args ...any) {
@@ -182,7 +185,7 @@ func Assert(cond bool, msg string) {
 }
 
 func abortf(skip int, format string, args ...any) {
-	Fprintf(os.Stderr, skip + 1, "ABORT: " + format + "\r\n", args...)
+	Fprintf(os.Stderr, skip + 1, "ABORT: " + format + "\n", args...)
 	os.Exit(1)
 }
 
