@@ -1,6 +1,9 @@
-const history = [];
-const historyEl = document.getElementById("history");
 const output = document.getElementById("output");
+const historyEl = document.getElementById("history");
+const serverHistoryEl = document.getElementById("serverHistory");
+const authStatus = document.getElementById("authStatus");
+
+let authKey = null;
 
 document.getElementById("runBtn").addEventListener("click", async () => {
   const code = document.getElementById("codeInput").value.trim();
@@ -11,63 +14,126 @@ document.getElementById("runBtn").addEventListener("click", async () => {
   try {
     const response = await fetch("/api/expr", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(authKey ? { "Authorization": "Bearer " + authKey } : {})
+      },
       body: JSON.stringify({ expr: code })
     });
 
-    if (!response.ok) throw new Error(`Server error: ${response.status}`);
-
     const data = await response.json();
-    let resultText;
+    const resultText = data.message
+      ? `Error: ${data.message}${data.loc ? ` (at ${data.loc.source}:${data.loc.line}:${data.loc.column})` : ""}`
+      : `Result: ${data.result}`;
 
-    if (data.error) {
-      resultText = `Error: ${data.error}`;
-      output.textContent = resultText;
-    } else if (data.result !== undefined) {
-      resultText = `Result: ${data.result}`;
-      output.textContent = resultText;
-    } else {
-      resultText = `Unknown response: ${JSON.stringify(data)}`;
-      output.textContent = resultText;
-    }
-
-    const item = document.createElement("div");
-    item.className = "history-item";
-
-    const cmd = document.createElement("div");
-    cmd.className = "history-command";
-    cmd.textContent = code;
-
-    const res = document.createElement("div");
-    res.className = "history-result";
-    res.textContent = resultText;
-
-    item.appendChild(cmd);
-    item.appendChild(res);
-
-    historyEl.appendChild(item);
-
-    historyEl.scrollTop = historyEl.scrollHeight;
+    output.textContent = resultText;
+    addHistoryItem(code, resultText);
 
   } catch (err) {
-    const errorText = `Fetch error: ${err.message}`;
-    output.textContent = errorText;
+    const msg = `Fetch error: ${err.message}`;
+    output.textContent = msg;
+    addHistoryItem(code, msg);
+  }
+});
 
-    const item = document.createElement("div");
-    item.className = "history-item";
+function addHistoryItem(command, result) {
+  const item = document.createElement("div");
+  item.className = "history-item";
 
-    const cmd = document.createElement("div");
-    cmd.className = "history-command";
-    cmd.textContent = code;
+  const cmd = document.createElement("div");
+  cmd.className = "history-command";
+  cmd.textContent = command;
 
-    const res = document.createElement("div");
-    res.className = "history-result";
-    res.textContent = errorText;
+  const res = document.createElement("div");
+  res.className = "history-result";
+  res.textContent = ">> " + result;
 
-    item.appendChild(cmd);
-    item.appendChild(res);
+  item.appendChild(cmd);
+  item.appendChild(res);
+  historyEl.appendChild(item);
 
-    historyEl.appendChild(item);
-    historyEl.scrollTop = historyEl.scrollHeight;
+  historyEl.scrollTop = historyEl.scrollHeight;
+}
+
+document.getElementById("loginBtn").addEventListener("click", async () => {
+  try {
+    const username = prompt("Enter username (leave empty for anonymous):") || "";
+    const password = username ? prompt("Enter password:") || "" : "";
+
+    const response = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+
+    const data = await response.json();
+    if (data.message) {
+      authStatus.textContent = "Login failed: " + data.message;
+      authKey = null;
+      return;
+    }
+
+    authStatus.textContent = username ? `Logged in as ${username}` : "Logged in (anonymous)";
+    authKey = response.headers.get("X-Auth-Key") || null;
+
+  } catch (err) {
+    authStatus.textContent = `Login error: ${err.message}`;
+    authKey = null;
+  }
+});
+
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  if (!authKey) {
+    authStatus.textContent = "Not authenticated";
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/logout", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + authKey
+      }
+    });
+
+    const data = await response.json();
+    authStatus.textContent = data.message || "Not authenticated";
+    authKey = null;
+
+  } catch (err) {
+    authStatus.textContent = `Logout error: ${err.message}`;
+  }
+});
+
+document.getElementById("loadHistoryBtn").addEventListener("click", async () => {
+  if (!authKey) {
+    serverHistoryEl.textContent = "Login first to load server history.";
+    return;
+  }
+
+  serverHistoryEl.textContent = "Loading from server...";
+  try {
+    const response = await fetch("/api/history", {
+      headers: {
+        "Authorization": "Bearer " + authKey
+      }
+    });
+
+    const data = await response.json();
+    if (data.message) {
+      serverHistoryEl.textContent = `Error: ${data.message}`;
+      return;
+    }
+
+    if (data.items && data.items.length > 0) {
+      serverHistoryEl.textContent = data.items
+        .map(h => `[${new Date(h.at).toLocaleTimeString()}] ${h.expr} => ${h.result}`)
+        .join("\n");
+    } else {
+      serverHistoryEl.textContent = "No server history found.";
+    }
+
+  } catch (err) {
+    serverHistoryEl.textContent = `Fetch error: ${err.message}`;
   }
 });
