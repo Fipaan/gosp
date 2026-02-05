@@ -53,6 +53,12 @@ func main() {
 	mux.HandleFunc("/api/login", sv.HandleLogin)
 	mux.HandleFunc("/api/expr", sv.HandleExpr)
 
+    mux.Handle("/",
+        http.StripPrefix("/",
+            http.FileServer(http.Dir("./public")),
+        ),
+    )
+
 	mux.HandleFunc("/api/logout", sv.RequireAuth(sv.HandleLogout))
 	mux.HandleFunc("/api/history", sv.RequireAuth(sv.HandleHistory))
 
