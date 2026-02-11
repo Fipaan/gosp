@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gosp REPL - Login</title>
+<style>
+body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
+.container { width: 300px; }
+input, button { width: 100%; margin: 5px 0; padding: 8px; }
+.error { color: red; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h2>Login / Register</h2>
+  <input id="username" placeholder="Username" />
+  <input id="password" type="password" placeholder="Password" />
+  <button id="loginBtn">Login</button>
+  <button id="registerBtn">Register</button>
+  <div class="error" id="error"></div>
+</div>
+
+<script>
+const apiReq = async (path, payload) => {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+};
+
+const login = async () => {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  if (!username || !password) return showError("Enter username and password");
+  const res = await apiReq('/api/login', {username, password});
+  if (res.result || res.status === 'OK') {
+    window.location.href = 'repl.html';
+  } else if (res.message) {
+    showError(res.message);
+  }
+};
+
+const register = async () => {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  if (!username || !password) return showError("Enter username and password");
+  const res = await apiReq('/api/register', {username, password});
+  if (res.status === 'OK') {
+    login();
+  } else if (res.message) {
+    showError(res.message);
+  }
+};
+
+const showError = (msg) => { document.getElementById('error').textContent = msg; };
+
+document.getElementById('loginBtn').addEventListener('click', login);
+document.getElementById('registerBtn').addEventListener('click', register);
+</script>
+</body>
+</html>
