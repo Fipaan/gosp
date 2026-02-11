@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gosp Functions</title>
+<style>
+body { font-family: monospace; margin: 0; display: flex; height: 100vh; }
+#sidebar { width: 200px; background: #f0f0f0; overflow-y: auto; padding: 10px; }
+#content { flex: 1; padding: 10px; overflow-y: auto; }
+button.func { display: block; width: 100%; margin: 5px 0; }
+</style>
+</head>
+<body>
+<div id="sidebar"></div>
+<div id="content"><h3>Select a function to see details</h3></div>
+
+<script>
+// Example built-in functions
+const functions = [
+  { name: 'add(a, b)', desc: 'Adds two numbers and returns result' },
+  { name: 'sub(a, b)', desc: 'Subtracts second number from first' },
+  { name: 'mul(a, b)', desc: 'Multiplies two numbers' },
+  { name: 'div(a, b)', desc: 'Divides first by second (b != 0)' }
+];
+
+const sidebar = document.getElementById('sidebar');
+const content = document.getElementById('content');
+
+functions.forEach(f => {
+  const btn = document.createElement('button');
+  btn.className = 'func';
+  btn.textContent = f.name;
+  btn.addEventListener('click', () => {
+    content.innerHTML = `<h3>${f.name}</h3><p>${f.desc}</p>`;
+    localStorage.setItem('insertExpr', f.name);
+    window.location.href = 'repl.html';
+  });
+  sidebar.appendChild(btn);
+});
+</script>
+</body>
+</html>
