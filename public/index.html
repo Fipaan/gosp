@@ -2,63 +2,178 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gosp REPL - Login</title>
+<title>Lisp REPL</title>
 <style>
-body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
-.container { width: 300px; }
-input, button { width: 100%; margin: 5px 0; padding: 8px; }
-.error { color: red; }
+body { margin:0; font-family: Arial; background:#111; color:white; }
+.navbar {
+    display:flex;
+    justify-content:flex-end;
+    align-items:center;
+    padding:10px 20px;
+    background:#1c1c1c;
+    gap:15px;
+}
+button {
+    background:#333;
+    color:white;
+    border:none;
+    padding:8px 14px;
+    cursor:pointer;
+}
+button:hover { background:#555; }
+textarea {
+    width:80%;
+    height:120px;
+    background:#222;
+    color:white;
+    border:none;
+    padding:10px;
+    font-family:monospace;
+}
+#output {
+    margin-top:20px;
+    background:#222;
+    padding:10px;
+    width:80%;
+    min-height:60px;
+}
+#sidebar {
+    position:fixed;
+    top:0;
+    right:-350px;
+    width:350px;
+    height:100%;
+    background:#1b1b1b;
+    padding:20px;
+    transition:0.3s;
+    overflow-y:auto;
+}
+#sidebar.active { right:0; }
+.command { cursor:pointer; padding:6px 0; }
+.command:hover { color:#00ffcc; }
+.example {
+    background:#222;
+    padding:8px;
+    margin-top:10px;
+    cursor:pointer;
+}
+.container {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    margin-top:40px;
+}
 </style>
 </head>
 <body>
-<div class="container">
-  <h2>Login / Register</h2>
-  <input id="username" placeholder="Username" />
-  <input id="password" type="password" placeholder="Password" />
-  <button id="loginBtn">Login</button>
-  <button id="registerBtn">Register</button>
-  <div class="error" id="error"></div>
+
+<div class="navbar">
+    <span id="usernameDisplay"></span>
+    <button onclick="toggleSidebar()">Info</button>
+    <button id="authButton"></button>
 </div>
 
+<div class="container">
+    <textarea id="codeInput" placeholder="Enter Lisp code..."></textarea>
+    <button onclick="runCode()">Run</button>
+    <div id="output"></div>
+</div>
+
+<div id="sidebar"></div>
+
 <script>
-const apiReq = async (path, payload) => {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  return res.json();
+const token = localStorage.getItem("token");
+const username = localStorage.getItem("username");
+
+const usernameDisplay = document.getElementById("usernameDisplay");
+const authButton = document.getElementById("authButton");
+
+if (token) {
+    usernameDisplay.textContent = username;
+    authButton.textContent = "Logout";
+    authButton.onclick = logout;
+} else {
+    authButton.textContent = "Login";
+    authButton.onclick = () => window.location.href = "login.html";
+}
+
+function logout() {
+    localStorage.removeItem("token");
+    localStorage.removeItem("username");
+    location.reload();
+}
+
+async function runCode() {
+    const code = document.getElementById("codeInput").value;
+
+    const res = await fetch("/run", {
+        method:"POST",
+        headers:{
+            "Content-Type":"application/json",
+            "Authorization": token ? "Bearer " + token : ""
+        },
+        body: JSON.stringify({ code })
+    });
+
+    const data = await res.json();
+    document.getElementById("output").innerText = data.result || data.error;
+}
+
+document.getElementById("codeInput").addEventListener("keydown", function(e){
+    if(e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        runCode();
+    }
+});
+
+const commands = {
+    car: {
+        syntax:"(car list)",
+        description:"Returns first element of list.",
+        example:"(car '(1 2 3))"
+    },
+    cdr: {
+        syntax:"(cdr list)",
+        description:"Returns list without first element.",
+        example:"(cdr '(1 2 3))"
+    },
+    define: {
+        syntax:"(define x 10)",
+        description:"Defines a variable.",
+        example:"(define x 5)"
+    }
 };
 
-const login = async () => {
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value;
-  if (!username || !password) return showError("Enter username and password");
-  const res = await apiReq('/api/login', {username, password});
-  if (res.result || res.status === 'OK') {
-    window.location.href = 'repl.html';
-  } else if (res.message) {
-    showError(res.message);
-  }
-};
+function toggleSidebar(){
+    const sidebar = document.getElementById("sidebar");
+    sidebar.classList.toggle("active");
+    renderCommandList();
+}
 
-const register = async () => {
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value;
-  if (!username || !password) return showError("Enter username and password");
-  const res = await apiReq('/api/register', {username, password});
-  if (res.status === 'OK') {
-    login();
-  } else if (res.message) {
-    showError(res.message);
-  }
-};
+function renderCommandList(){
+    const sidebar = document.getElementById("sidebar");
+    sidebar.innerHTML = "<h3>Commands</h3>";
+    for(let cmd in commands){
+        sidebar.innerHTML += `<div class="command" onclick="showCommand('${cmd}')">${cmd}</div>`;
+    }
+}
 
-const showError = (msg) => { document.getElementById('error').textContent = msg; };
+function showCommand(cmd){
+    const c = commands[cmd];
+    const sidebar = document.getElementById("sidebar");
+    sidebar.innerHTML = `
+        <button onclick="renderCommandList()">← Back</button>
+        <h3>${cmd}</h3>
+        <p><b>Syntax:</b> ${c.syntax}</p>
+        <p>${c.description}</p>
+        <div class="example" onclick="insertExample('${c.example}')">${c.example}</div>
+    `;
+}
 
-document.getElementById('loginBtn').addEventListener('click', login);
-document.getElementById('registerBtn').addEventListener('click', register);
+function insertExample(text){
+    document.getElementById("codeInput").value = text;
+}
 </script>
+
 </body>
 </html>
