@@ -11,17 +11,15 @@ body { margin:0; font-family: Arial; background:#111; color:white; }
     align-items:center;
     padding:10px 20px;
     background:#1c1c1c;
-    gap:15px;
 }
 .nav-left {
-    display:flex;
-    align-items:center;
-    gap:15px;
+    font-weight:bold;
+    font-size:18px;
 }
 .nav-right {
     display:flex;
     align-items:center;
-    gap:15px;
+    gap:10px;
 }
 button {
     background:#333;
@@ -44,6 +42,7 @@ button:hover { background:#555; }
     margin-top:10px;
     display:flex;
     width:80%;
+    gap:10px;
 }
 textarea {
     flex:1;
@@ -85,11 +84,10 @@ textarea {
 <body>
 
 <div class="navbar">
-    <div class="nav-left">
-        <span style="font-weight:bold; font-size:18px;">Gosp</span>
-        <span id="usernameDisplay"></span>
-    </div>
+    <div class="nav-left">Gosp</div>
+    <div style="flex:1"></div> <!-- пустое место -->
     <div class="nav-right">
+        <span id="usernameDisplay"></span>
         <button onclick="toggleSidebar()">Info</button>
         <button id="authButton"></button>
     </div>
@@ -117,6 +115,7 @@ if (token) {
     authButton.textContent = "Logout";
     authButton.onclick = logout;
 } else {
+    usernameDisplay.textContent = "";
     authButton.textContent = "Login";
     authButton.onclick = () => window.location.href = "login.html";
 }
@@ -129,7 +128,7 @@ function logout() {
 
 async function runCode() {
     const code = document.getElementById("codeInput").value;
-    if(!code.trim()) return; // игнор пустых строк
+    if(!code.trim()) return;
 
     const res = await fetch("/api/expr", {
         method:"POST",
@@ -152,7 +151,6 @@ document.getElementById("codeInput").addEventListener("keydown", function(e){
         e.preventDefault();
         runCode();
     } else if(e.key === "Enter" && e.shiftKey){
-        // добавляем новую строку
         const start = this.selectionStart;
         const end = this.selectionEnd;
         const value = this.value;
@@ -195,6 +193,7 @@ function renderCommandList(){
     }
 }
 
+// Функция showCommand для отображения выбранной команды
 function showCommand(cmd){
     const c = commands[cmd];
     const sidebar = document.getElementById("sidebar");
