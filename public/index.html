@@ -4,20 +4,54 @@
 <meta charset="UTF-8">
 <title>Lisp REPL</title>
 <style>
-body { margin:0; font-family: Arial; background:#111; color:white; transition: margin-right 0.3s; }
-.navbar { display:flex; justify-content:space-between; align-items:center; padding:10px 20px; background:#1c1c1c; transition: margin-right 0.3s; }
+body { margin:0; font-family: Arial; background:#111; color:white; transition: all 0.3s; }
+.navbar {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:10px 20px;
+    background:#1c1c1c;
+    transition: all 0.3s;
+}
 .nav-left { font-weight:bold; font-size:18px; }
-.nav-right { display:flex; align-items:center; gap:10px; transition: margin-right 0.3s; }
+.nav-right { display:flex; align-items:center; gap:10px; transition: all 0.3s; }
 button { background:#333; color:white; border:none; padding:8px 14px; cursor:pointer; }
 button:hover { background:#555; }
-#output { margin-top:20px; background:#222; padding:10px; width:80%; min-height:120px; white-space: pre-wrap; font-family: monospace; transition: margin-right 0.3s; }
-#codeContainer { margin-top:10px; display:flex; width:80%; gap:10px; transition: margin-right 0.3s; }
+#output {
+    margin-top:20px;
+    background:#222;
+    padding:10px;
+    width:80%;
+    min-height:120px;
+    white-space: pre-wrap;
+    font-family: monospace;
+    transition: all 0.3s;
+}
+#codeContainer {
+    margin-top:10px;
+    display:flex;
+    width:80%;
+    gap:10px;
+    transition: all 0.3s;
+}
 textarea { flex:1; height:80px; background:#222; color:white; border:none; padding:10px; font-family:monospace; }
-#sidebar { position:fixed; top:0; right:-350px; width:350px; height:100%; background:#1b1b1b; padding:20px; transition: right 0.3s; overflow-y:auto; z-index:100; }
+#sidebar {
+    position:fixed;
+    top:0;
+    right:-350px;
+    width:350px;
+    height:100%;
+    background:#1b1b1b;
+    padding:20px;
+    transition: right 0.3s;
+    overflow-y:auto;
+    z-index:100;
+}
 #sidebar.active { right:0; }
 .command { cursor:pointer; padding:6px 0; display:inline-block; margin:4px; background:#333; border-radius:4px; }
 .command:hover { color:#00ffcc; }
-.example { background:#222; padding:8px; margin-top:10px; cursor:pointer; }
+.example-btn { margin-top:5px; padding:6px 10px; background:#444; border-radius:4px; cursor:pointer; }
+.example-btn:hover { background:#666; }
 .container { display:flex; flex-direction:column; align-items:center; margin-top:40px; }
 </style>
 </head>
@@ -46,6 +80,7 @@ textarea { flex:1; height:80px; background:#222; color:white; border:none; paddi
 <script>
 const token = localStorage.getItem("token");
 const username = localStorage.getItem("username");
+
 const usernameDisplay = document.getElementById("usernameDisplay");
 const authButton = document.getElementById("authButton");
 const body = document.body;
@@ -86,9 +121,9 @@ async function runCode() {
     const out = data.result || data.error || "";
 
     const lines = code.split("\n");
-    const codeBlock = lines.map(l => `<div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+    const codeBlock = lines.map(l => `<div style="display:flex; justify-content:space-between;">
         <span>${l}</span>
-        <button onclick="insertExample('${l.replace(/'/g,"\\'")}')">Insert</button>
+        <button class="example-btn" onclick="insertExample('${l.replace(/'/g,"\\'")}')">Insert</button>
     </div>`).join("");
     outputDiv.innerHTML += codeBlock + `<div>${out}</div><hr>`;
     document.getElementById("codeInput").value = "";
@@ -109,30 +144,30 @@ document.getElementById("codeInput").addEventListener("keydown", function(e){
 });
 
 const commands = {
-    "+": {syntax:"(+ a b ...)", description:"Adds all arguments.", example:"(+ 1.2 2.5 3.7)"},
+    "+": {syntax:"(+ a b ...)", description:"Adds all arguments.", example:"(+ 1.2 2.3 3.4)"},
     "-": {syntax:"(- a b)", description:"Subtracts second from first.", example:"(- 10.5 3.2)"},
-    "*": {syntax:"(* a b ...)", description:"Multiplies arguments.", example:"(* 2.1 3.4 4.5)"},
-    "/": {syntax:"(/ a b)", description:"Divides first by second.", example:"(/ 8.8 2.2)"},
+    "*": {syntax:"(* a b ...)", description:"Multiplies arguments.", example:"(* 2.1 3.3 4.4)"},
+    "/": {syntax:"(/ a b)", description:"Divides first by second.", example:"(/ 8.2 2.1)"},
     "head": {syntax:"(head list)", description:"Returns first element of list.", example:"(head '(1.2 2.3 3.4))"},
-    "tail": {syntax:"(tail list)", description:"Returns list without first element.", example:"(tail '(1.1 2.2 3.3))"},
-    "<": {syntax:"(< a b)", description:"Checks if a < b.", example:"(< 5.5 10.1)"},
-    ">": {syntax: "(> a b)", description:"Checks if a > b.", example: "(> 5.9 10.0)"},
-    "=": {syntax:"(= a b)", description:"Checks equality.", example:"(= 5.0 5.0)"}
+    "tail": {syntax:"(tail list)", description:"Returns list without first element.", example:"(tail '(1.2 2.3 3.4))"},
+    "<": {syntax:"(< a b)", description:"Checks if a < b.", example:"(< 5.5 10.2)"},
+    ">": {syntax: "(> a b)", description:"Checks if a > b.", example: "(> 5.5 10.2)"},
+    "=": {syntax:"(= a b)", description:"Checks equality.", example:"(= 5.5 5.5)"}
 };
 
 function toggleSidebar(){
     const sidebar = document.getElementById("sidebar");
     sidebar.classList.toggle("active");
     if(sidebar.classList.contains("active")){
-        body.style.marginRight = "350px";
-        navbar.style.marginRight = "350px";
-        outputDiv.style.marginRight = "350px";
-        codeContainer.style.marginRight = "350px";
+        body.style.width = "calc(100% - 350px)";
+        navbar.style.width = "calc(100% - 350px)";
+        outputDiv.style.width = "calc(80% - 350px)";
+        codeContainer.style.width = "calc(80% - 350px)";
     } else {
-        body.style.marginRight = "0";
-        navbar.style.marginRight = "0";
-        outputDiv.style.marginRight = "0";
-        codeContainer.style.marginRight = "0";
+        body.style.width = "100%";
+        navbar.style.width = "100%";
+        outputDiv.style.width = "80%";
+        codeContainer.style.width = "80%";
     }
     renderCommandList();
 }
@@ -153,7 +188,8 @@ function showCommand(cmd){
         <h3>${cmd}</h3>
         <p><b>Syntax:</b> ${c.syntax}</p>
         <p>${c.description}</p>
-        <div class="example" onclick="insertExample('${c.example}')">${c.example}</div>
+        <p><b>Example:</b> ${c.example}</p>
+        <button class="example-btn" onclick="insertExample('${c.example.replace(/'/g,"\\'")}')">Insert</button>
     `;
 }
 
