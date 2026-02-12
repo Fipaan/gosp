@@ -1,47 +1,56 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Register</title>
+<title>Gosp Registration</title>
 <style>
-body { background:#111; color:white; font-family:Arial; display:flex; justify-content:center; align-items:center; height:100vh; }
-.container { display:flex; flex-direction:column; width:300px; gap:10px; }
-input, button { padding:8px; border:none; }
-button { background:#333; color:white; cursor:pointer; }
+body { margin:0; font-family: Arial; background:#111; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; }
+.container { background:#1c1c1c; padding:40px; border-radius:8px; width:300px; display:flex; flex-direction:column; gap:15px; }
+h2 { text-align:center; margin:0 0 20px 0; }
+input { background:#222; color:white; border:none; padding:10px; font-family:monospace; }
+button { background:#333; color:white; border:none; padding:10px; cursor:pointer; }
+button:hover { background:#555; }
+.link { text-align:center; font-size:14px; cursor:pointer; color:#00ffcc; }
+.link:hover { text-decoration:underline; }
 </style>
 </head>
 <body>
-
 <div class="container">
-<h2>Register</h2>
-<input id="username" placeholder="Username">
-<input id="password" type="password" placeholder="Password">
-<button onclick="register()">Register</button>
-<div id="error"></div>
+    <h2>Gosp Registration</h2>
+    <input type="text" id="username" placeholder="Username">
+    <input type="password" id="password" placeholder="Password">
+    <button onclick="register()">Register</button>
+    <div class="link" onclick="window.location.href='login.html'">Already have an account? Login</div>
+    <div id="message" style="color:red; font-size:14px;"></div>
 </div>
 
 <script>
-async function register(){
-    const username = document.getElementById("username").value;
-    const password = document.getElementById("password").value;
+async function register() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const msg = document.getElementById('message');
+    msg.textContent = '';
 
-    const res = await fetch("/register",{
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ username, password })
-    });
+    if(!username || !password) { msg.textContent = 'Enter username and password'; return; }
 
-    const data = await res.json();
-
-    if(res.ok){
-        localStorage.setItem("token", data.token);
-        localStorage.setItem("username", data.username);
-        window.location.href="index.html";
-    } else {
-        document.getElementById("error").innerText = data.error;
+    try {
+        const res = await fetch('/api/register', {
+            method:'POST',
+            headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if(data.success){
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('username', username);
+            window.location.href = 'index.html';
+        } else {
+            msg.textContent = data.error || 'Registration failed';
+        }
+    } catch(e){
+        msg.textContent = 'Network error';
     }
 }
 </script>
-
 </body>
 </html>
