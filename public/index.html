@@ -103,45 +103,72 @@ function logout() {
     location.reload();
 }
 
-async function runCode() {
-    const code = document.getElementById("codeInput").value;
+const codeInput = document.getElementById("codeInput");
+const output = document.getElementById("output");
+const historyDiv = document.getElementById("output"); // используем тот же блок для истории
 
-    const res = await fetch("/run", {
-        method:"POST",
-        headers:{
-            "Content-Type":"application/json",
-            "Authorization": token ? "Bearer " + token : ""
-        },
-        body: JSON.stringify({ code })
-    });
-
-    const data = await res.json();
-    document.getElementById("output").innerText = data.result || data.error;
+function appendHistory(expr, res) {
+    const div = document.createElement("div");
+    div.innerHTML = `<pre>${expr}</pre><pre>${res}</pre>`;
+    historyDiv.appendChild(div);
+    historyDiv.scrollTop = historyDiv.scrollHeight;
 }
 
-document.getElementById("codeInput").addEventListener("keydown", function(e){
-    if(e.key === "Enter" && !e.shiftKey){
-        e.preventDefault();
-        runCode();
+async function runCode() {
+    const code = codeInput.value;
+    if (!code.trim()) return; // не выполняем если пусто
+
+    const lines = code.split("\n").filter(line => line.trim() !== "");
+
+    for (const line of lines) {
+        try {
+            const resp = await fetch("/api/expr", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": token ? "Bearer " + token : ""
+                },
+                body: JSON.stringify({ expr: line })
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                appendHistory(line, data.result);
+            } else {
+                appendHistory(line, `Error: ${data.error || JSON.stringify(data)}`);
+            }
+        } catch (err) {
+            appendHistory(line, `Network error: ${err.message}`);
+        }
+    }
+
+    codeInput.value = ""; // очищаем поле после выполнения
+}
+
+// ENTER / SHIFT+ENTER
+codeInput.addEventListener("keydown", function(e){
+    if (e.key === "Enter") {
+        if (e.shiftKey) {
+            // вставка новой строки
+            const start = codeInput.selectionStart;
+            const end = codeInput.selectionEnd;
+            codeInput.value = codeInput.value.substring(0, start) + "\n" + codeInput.value.substring(end);
+            codeInput.selectionStart = codeInput.selectionEnd = start + 1;
+            e.preventDefault();
+        } else {
+            // обычный ENTER → выполняем код
+            e.preventDefault();
+            runCode();
+        }
     }
 });
 
+document.getElementById("runBtn").addEventListener("click", runCode);
+
+// Commands sidebar
 const commands = {
-    car: {
-        syntax:"(car list)",
-        description:"Returns first element of list.",
-        example:"(car '(1 2 3))"
-    },
-    cdr: {
-        syntax:"(cdr list)",
-        description:"Returns list without first element.",
-        example:"(cdr '(1 2 3))"
-    },
-    define: {
-        syntax:"(define x 10)",
-        description:"Defines a variable.",
-        example:"(define x 5)"
-    }
+    car: { syntax:"(car list)", description:"Returns first element of list.", example:"(car '(1 2 3))" },
+    cdr: { syntax:"(cdr list)", description:"Returns list without first element.", example:"(cdr '(1 2 3))" },
+    define: { syntax:"(define x 10)", description:"Defines a variable.", example:"(define x 5)" }
 };
 
 function toggleSidebar(){
@@ -171,7 +198,8 @@ function showCommand(cmd){
 }
 
 function insertExample(text){
-    document.getElementById("codeInput").value = text;
+    codeInput.value = text;
+    codeInput.focus();
 }
 </script>
 
