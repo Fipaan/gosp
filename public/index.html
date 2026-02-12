@@ -4,26 +4,54 @@
 <meta charset="UTF-8">
 <title>Lisp REPL</title>
 <style>
-body { margin:0; font-family: Arial; background:#111; color:white; }
-.navbar { display:flex; justify-content:space-between; align-items:center; padding:10px 20px; background:#1c1c1c; }
+body { margin:0; font-family: Arial; background:#111; color:white; transition: margin-right 0.3s; }
+.navbar {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:10px 20px;
+    background:#1c1c1c;
+    transition: margin-right 0.3s;
+}
 .nav-left { font-weight:bold; font-size:18px; }
-.nav-right { display:flex; align-items:center; gap:10px; }
+.nav-right { display:flex; align-items:center; gap:10px; transition: margin-right 0.3s; }
 button { background:#333; color:white; border:none; padding:8px 14px; cursor:pointer; }
 button:hover { background:#555; }
-#output { margin-top:20px; background:#222; padding:10px; width:80%; min-height:120px; font-family: monospace; }
-#codeContainer { margin-top:10px; display:flex; width:80%; gap:10px; }
+#output {
+    margin-top:20px;
+    background:#222;
+    padding:10px;
+    width:80%;
+    min-height:120px;
+    white-space: pre-wrap;
+    font-family: monospace;
+    transition: margin-right 0.3s;
+}
+#codeContainer {
+    margin-top:10px;
+    display:flex;
+    width:80%;
+    gap:10px;
+    transition: margin-right 0.3s;
+}
 textarea { flex:1; height:80px; background:#222; color:white; border:none; padding:10px; font-family:monospace; }
-#sidebar { position:fixed; top:0; right:-350px; width:350px; height:100%; background:#1b1b1b; padding:20px; transition:0.3s; overflow-y:auto; }
+#sidebar {
+    position:fixed;
+    top:0;
+    right:-350px;
+    width:350px;
+    height:100%;
+    background:#1b1b1b;
+    padding:20px;
+    transition: right 0.3s;
+    overflow-y:auto;
+    z-index:100;
+}
 #sidebar.active { right:0; }
-.command { cursor:pointer; padding:6px 0; }
+.command { cursor:pointer; padding:6px 0; display:inline-block; margin:4px; background:#333; border-radius:4px; }
 .command:hover { color:#00ffcc; }
 .example { background:#222; padding:8px; margin-top:10px; cursor:pointer; }
 .container { display:flex; flex-direction:column; align-items:center; margin-top:40px; }
-.history-item { display:flex; align-items:flex-start; gap:10px; margin-top:5px; }
-.history-command { flex:1; background:#222; padding:6px; white-space: pre-wrap; }
-.history-output { flex:1; background:#333; padding:6px; white-space: pre-wrap; }
-.history-item button { flex-shrink:0; background:#444; color:white; border:none; padding:4px 8px; cursor:pointer; }
-.history-item button:hover { background:#666; }
 </style>
 </head>
 <body>
@@ -51,101 +79,122 @@ textarea { flex:1; height:80px; background:#222; color:white; border:none; paddi
 <script>
 const token = localStorage.getItem("token");
 const username = localStorage.getItem("username");
+
 const usernameDisplay = document.getElementById("usernameDisplay");
 const authButton = document.getElementById("authButton");
+const body = document.body;
+const navbar = document.querySelector(".navbar");
+const outputDiv = document.getElementById("output");
+const codeContainer = document.getElementById("codeContainer");
 
-if(token){
+if (token) {
     usernameDisplay.textContent = username;
     authButton.textContent = "Logout";
     authButton.onclick = logout;
-    fetchHistory();
 } else {
     usernameDisplay.textContent = "";
     authButton.textContent = "Login";
-    authButton.onclick = () => window.location.href="login.html";
+    authButton.onclick = () => window.location.href = "login.html";
 }
 
-function logout(){
+function logout() {
     localStorage.removeItem("token");
     localStorage.removeItem("username");
     location.reload();
 }
 
-function appendHistory(command, output){
-    const outputDiv = document.getElementById("output");
-    const item = document.createElement("div");
-    item.className = "history-item";
-    item.innerHTML = `<pre class="history-command">${command}</pre>
-                      <button onclick="insertExample(\`${command}\`)">Insert</button>
-                      <pre class="history-output">${output}</pre>`;
-    outputDiv.appendChild(item);
-    outputDiv.scrollTop = outputDiv.scrollHeight;
-}
-
-async function runCode(){
+async function runCode() {
     const code = document.getElementById("codeInput").value;
     if(!code.trim()) return;
+
     const res = await fetch("/api/expr", {
         method:"POST",
-        headers:{"Content-Type":"application/json", "Authorization": token ? "Bearer "+token : ""},
-        body: JSON.stringify({expr:code})
+        headers:{
+            "Content-Type":"application/json",
+            "Authorization": token ? "Bearer " + token : ""
+        },
+        body: JSON.stringify({ expr: code })
     });
+
     const data = await res.json();
     const out = data.result || data.error || "";
-    appendHistory(code, out);
-    document.getElementById("codeInput").value="";
+    
+    // Выводим код слева и кнопку справа для повторного вставления
+    const lines = code.split("\n");
+    const codeBlock = lines.map(l => `<div style="display:flex; justify-content:space-between;">
+        <span>${l}</span>
+        <button onclick="insertExample('${l.replace(/'/g,"\\'")}')">Insert</button>
+    </div>`).join("");
+    outputDiv.innerHTML += codeBlock + `<div>${out}</div><hr>`;
+    document.getElementById("codeInput").value = "";
 }
 
 document.getElementById("codeInput").addEventListener("keydown", function(e){
-    if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); runCode(); }
-    else if(e.key==="Enter" && e.shiftKey){
-        const start=this.selectionStart, end=this.selectionEnd, value=this.value;
-        this.value=value.slice(0,start)+"\n"+value.slice(end);
-        this.selectionStart=this.selectionEnd=start+1;
+    if(e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        runCode();
+    } else if(e.key === "Enter" && e.shiftKey){
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        const value = this.value;
+        this.value = value.slice(0,start) + "\n" + value.slice(end);
+        this.selectionStart = this.selectionEnd = start+1;
         e.preventDefault();
     }
 });
 
+// Все встроенные функции кроме map
 const commands = {
-    car: {syntax:"(car list)", description:"Returns first element of list.", example:"(car '(1 2 3))"},
-    cdr: {syntax:"(cdr list)", description:"Returns list without first element.", example:"(cdr '(1 2 3))"},
-    define: {syntax:"(define x 10)", description:"Defines a variable.", example:"(define x 5)"}
+    "+": {syntax:"(+ a b ...)", description:"Adds all arguments.", example:"(+ 1 2 3)"},
+    "-": {syntax:"(- a b)", description:"Subtracts second from first.", example:"(- 10 3)"},
+    "*": {syntax:"(* a b ...)", description:"Multiplies arguments.", example:"(* 2 3 4)"},
+    "/": {syntax:"(/ a b)", description:"Divides first by second.", example:"(/ 8 2)"},
+    "head": {syntax:"(head list)", description:"Returns first element of list.", example:"(head '(1 2 3))"},
+    "tail": {syntax:"(tail list)", description:"Returns list without first element.", example:"(tail '(1 2 3))"},
+    "<": {syntax:"(< a b)", description:"Checks if a < b.", example:"(< 5 10)"},
+    ">": {syntax: "(> a b)", description:"Checks if a > b.", example: "(> 5 10)"},
+    "=": {syntax:"(= a b)", description:"Checks equality.", example:"(= 5 5)"}
 };
 
 function toggleSidebar(){
-    const sidebar=document.getElementById("sidebar");
+    const sidebar = document.getElementById("sidebar");
     sidebar.classList.toggle("active");
+    if(sidebar.classList.contains("active")){
+        body.style.marginRight = "350px";
+        navbar.style.marginRight = "350px";
+        outputDiv.style.marginRight = "350px";
+        codeContainer.style.marginRight = "350px";
+    } else {
+        body.style.marginRight = "0";
+        navbar.style.marginRight = "0";
+        outputDiv.style.marginRight = "0";
+        codeContainer.style.marginRight = "0";
+    }
     renderCommandList();
 }
 
 function renderCommandList(){
-    const sidebar=document.getElementById("sidebar");
-    sidebar.innerHTML="<h3>Commands</h3>";
+    const sidebar = document.getElementById("sidebar");
+    sidebar.innerHTML = "<h3>Commands</h3>";
     for(let cmd in commands){
-        sidebar.innerHTML+=`<div class="command" onclick="showCommand('${cmd}')">${cmd}</div>`;
+        sidebar.innerHTML += `<div class="command" onclick="showCommand('${cmd}')">${cmd}</div>`;
     }
 }
 
 function showCommand(cmd){
-    const c=commands[cmd];
-    const sidebar=document.getElementById("sidebar");
-    sidebar.innerHTML=`<button onclick="renderCommandList()">← Back</button>
-                       <h3>${cmd}</h3>
-                       <p><b>Syntax:</b> ${c.syntax}</p>
-                       <p>${c.description}</p>
-                       <div class="example" onclick="insertExample('${c.example}')">${c.example}</div>`;
+    const c = commands[cmd];
+    const sidebar = document.getElementById("sidebar");
+    sidebar.innerHTML = `
+        <button onclick="renderCommandList()">← Back</button>
+        <h3>${cmd}</h3>
+        <p><b>Syntax:</b> ${c.syntax}</p>
+        <p>${c.description}</p>
+        <div class="example" onclick="insertExample('${c.example}')">${c.example}</div>
+    `;
 }
 
-function insertExample(text){ document.getElementById("codeInput").value=text; }
-
-async function fetchHistory(){
-    const res=await fetch("/api/history", {
-        headers:{"Authorization": "Bearer "+token}
-    });
-    const data=await res.json();
-    if(Array.isArray(data)){
-        data.forEach(item=>appendHistory(item.expr,item.result));
-    }
+function insertExample(text){
+    document.getElementById("codeInput").value = text;
 }
 </script>
 
