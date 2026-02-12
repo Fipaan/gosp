@@ -5,87 +5,32 @@
 <title>Lisp REPL</title>
 <style>
 body { margin:0; font-family: Arial; background:#111; color:white; }
-.navbar {
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:10px 20px;
-    background:#1c1c1c;
-}
-.nav-left {
-    font-weight:bold;
-    font-size:18px;
-}
-.nav-right {
-    display:flex;
-    align-items:center;
-    gap:10px;
-}
-button {
-    background:#333;
-    color:white;
-    border:none;
-    padding:8px 14px;
-    cursor:pointer;
-}
+.navbar { display:flex; justify-content:space-between; align-items:center; padding:10px 20px; background:#1c1c1c; }
+.nav-left { font-weight:bold; font-size:18px; }
+.nav-right { display:flex; align-items:center; gap:10px; }
+button { background:#333; color:white; border:none; padding:8px 14px; cursor:pointer; }
 button:hover { background:#555; }
-#output {
-    margin-top:20px;
-    background:#222;
-    padding:10px;
-    width:80%;
-    min-height:120px;
-    white-space: pre-wrap;
-    font-family: monospace;
-}
-#codeContainer {
-    margin-top:10px;
-    display:flex;
-    width:80%;
-    gap:10px;
-}
-textarea {
-    flex:1;
-    height:80px;
-    background:#222;
-    color:white;
-    border:none;
-    padding:10px;
-    font-family:monospace;
-}
-#sidebar {
-    position:fixed;
-    top:0;
-    right:-350px;
-    width:350px;
-    height:100%;
-    background:#1b1b1b;
-    padding:20px;
-    transition:0.3s;
-    overflow-y:auto;
-}
+#output { margin-top:20px; background:#222; padding:10px; width:80%; min-height:120px; font-family: monospace; }
+#codeContainer { margin-top:10px; display:flex; width:80%; gap:10px; }
+textarea { flex:1; height:80px; background:#222; color:white; border:none; padding:10px; font-family:monospace; }
+#sidebar { position:fixed; top:0; right:-350px; width:350px; height:100%; background:#1b1b1b; padding:20px; transition:0.3s; overflow-y:auto; }
 #sidebar.active { right:0; }
 .command { cursor:pointer; padding:6px 0; }
 .command:hover { color:#00ffcc; }
-.example {
-    background:#222;
-    padding:8px;
-    margin-top:10px;
-    cursor:pointer;
-}
-.container {
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    margin-top:40px;
-}
+.example { background:#222; padding:8px; margin-top:10px; cursor:pointer; }
+.container { display:flex; flex-direction:column; align-items:center; margin-top:40px; }
+.history-item { display:flex; align-items:flex-start; gap:10px; margin-top:5px; }
+.history-command { flex:1; background:#222; padding:6px; white-space: pre-wrap; }
+.history-output { flex:1; background:#333; padding:6px; white-space: pre-wrap; }
+.history-item button { flex-shrink:0; background:#444; color:white; border:none; padding:4px 8px; cursor:pointer; }
+.history-item button:hover { background:#666; }
 </style>
 </head>
 <body>
 
 <div class="navbar">
     <div class="nav-left">Gosp</div>
-    <div style="flex:1"></div> <!-- пустое место -->
+    <div style="flex:1"></div>
     <div class="nav-right">
         <span id="usernameDisplay"></span>
         <button onclick="toggleSidebar()">Info</button>
@@ -106,108 +51,101 @@ textarea {
 <script>
 const token = localStorage.getItem("token");
 const username = localStorage.getItem("username");
-
 const usernameDisplay = document.getElementById("usernameDisplay");
 const authButton = document.getElementById("authButton");
 
-if (token) {
+if(token){
     usernameDisplay.textContent = username;
     authButton.textContent = "Logout";
     authButton.onclick = logout;
+    fetchHistory();
 } else {
     usernameDisplay.textContent = "";
     authButton.textContent = "Login";
-    authButton.onclick = () => window.location.href = "login.html";
+    authButton.onclick = () => window.location.href="login.html";
 }
 
-function logout() {
+function logout(){
     localStorage.removeItem("token");
     localStorage.removeItem("username");
     location.reload();
 }
 
-async function runCode() {
+function appendHistory(command, output){
+    const outputDiv = document.getElementById("output");
+    const item = document.createElement("div");
+    item.className = "history-item";
+    item.innerHTML = `<pre class="history-command">${command}</pre>
+                      <button onclick="insertExample(\`${command}\`)">Insert</button>
+                      <pre class="history-output">${output}</pre>`;
+    outputDiv.appendChild(item);
+    outputDiv.scrollTop = outputDiv.scrollHeight;
+}
+
+async function runCode(){
     const code = document.getElementById("codeInput").value;
     if(!code.trim()) return;
-
     const res = await fetch("/api/expr", {
         method:"POST",
-        headers:{
-            "Content-Type":"application/json",
-            "Authorization": token ? "Bearer " + token : ""
-        },
-        body: JSON.stringify({ expr: code })
+        headers:{"Content-Type":"application/json", "Authorization": token ? "Bearer "+token : ""},
+        body: JSON.stringify({expr:code})
     });
-
     const data = await res.json();
     const out = data.result || data.error || "";
-    const outputDiv = document.getElementById("output");
-    outputDiv.textContent += out + "\n";
-    document.getElementById("codeInput").value = "";
+    appendHistory(code, out);
+    document.getElementById("codeInput").value="";
 }
 
 document.getElementById("codeInput").addEventListener("keydown", function(e){
-    if(e.key === "Enter" && !e.shiftKey){
-        e.preventDefault();
-        runCode();
-    } else if(e.key === "Enter" && e.shiftKey){
-        const start = this.selectionStart;
-        const end = this.selectionEnd;
-        const value = this.value;
-        this.value = value.slice(0,start) + "\n" + value.slice(end);
-        this.selectionStart = this.selectionEnd = start+1;
+    if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); runCode(); }
+    else if(e.key==="Enter" && e.shiftKey){
+        const start=this.selectionStart, end=this.selectionEnd, value=this.value;
+        this.value=value.slice(0,start)+"\n"+value.slice(end);
+        this.selectionStart=this.selectionEnd=start+1;
         e.preventDefault();
     }
 });
 
-// Sidebar commands
 const commands = {
-    car: {
-        syntax:"(car list)",
-        description:"Returns first element of list.",
-        example:"(car '(1 2 3))"
-    },
-    cdr: {
-        syntax:"(cdr list)",
-        description:"Returns list without first element.",
-        example:"(cdr '(1 2 3))"
-    },
-    define: {
-        syntax:"(define x 10)",
-        description:"Defines a variable.",
-        example:"(define x 5)"
-    }
+    car: {syntax:"(car list)", description:"Returns first element of list.", example:"(car '(1 2 3))"},
+    cdr: {syntax:"(cdr list)", description:"Returns list without first element.", example:"(cdr '(1 2 3))"},
+    define: {syntax:"(define x 10)", description:"Defines a variable.", example:"(define x 5)"}
 };
 
 function toggleSidebar(){
-    const sidebar = document.getElementById("sidebar");
+    const sidebar=document.getElementById("sidebar");
     sidebar.classList.toggle("active");
     renderCommandList();
 }
 
 function renderCommandList(){
-    const sidebar = document.getElementById("sidebar");
-    sidebar.innerHTML = "<h3>Commands</h3>";
+    const sidebar=document.getElementById("sidebar");
+    sidebar.innerHTML="<h3>Commands</h3>";
     for(let cmd in commands){
-        sidebar.innerHTML += `<div class="command" onclick="showCommand('${cmd}')">${cmd}</div>`;
+        sidebar.innerHTML+=`<div class="command" onclick="showCommand('${cmd}')">${cmd}</div>`;
     }
 }
 
-// Функция showCommand для отображения выбранной команды
 function showCommand(cmd){
-    const c = commands[cmd];
-    const sidebar = document.getElementById("sidebar");
-    sidebar.innerHTML = `
-        <button onclick="renderCommandList()">← Back</button>
-        <h3>${cmd}</h3>
-        <p><b>Syntax:</b> ${c.syntax}</p>
-        <p>${c.description}</p>
-        <div class="example" onclick="insertExample('${c.example}')">${c.example}</div>
-    `;
+    const c=commands[cmd];
+    const sidebar=document.getElementById("sidebar");
+    sidebar.innerHTML=`<button onclick="renderCommandList()">← Back</button>
+                       <h3>${cmd}</h3>
+                       <p><b>Syntax:</b> ${c.syntax}</p>
+                       <p>${c.description}</p>
+                       <div class="example" onclick="insertExample('${c.example}')">${c.example}</div>`;
 }
 
-function insertExample(text){
-    document.getElementById("codeInput").value = text;
+function insertExample(text){ document.getElementById("codeInput").value=text; }
+
+async function fetchHistory(){
+    const res=await fetch("/api/history", {
+        headers:{"Authorization": "Bearer "+token}
+    });
+    const data=await res.json();
+    if(Array.isArray(data)){
+        data.forEach(item=>appendHistory(item.expr,item.result));
+    }
 }
 </script>
 
