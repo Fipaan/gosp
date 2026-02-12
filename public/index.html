@@ -4,17 +4,16 @@
 <meta charset="UTF-8">
 <title>Lisp REPL</title>
 <style>
-body { margin:0; font-family: Arial; background:#111; color:white; transition: all 0.3s; }
+body { margin:0; font-family: Arial; background:#111; color:white; transition: all 0.3s; overflow-x:hidden; }
 .navbar {
     display:flex;
     justify-content:space-between;
     align-items:center;
     padding:10px 20px;
     background:#1c1c1c;
-    transition: all 0.3s;
 }
 .nav-left { font-weight:bold; font-size:18px; }
-.nav-right { display:flex; align-items:center; gap:10px; transition: all 0.3s; }
+.nav-right { display:flex; align-items:center; gap:10px; }
 button { background:#333; color:white; border:none; padding:8px 14px; cursor:pointer; }
 button:hover { background:#555; }
 #output {
@@ -25,34 +24,44 @@ button:hover { background:#555; }
     min-height:120px;
     white-space: pre-wrap;
     font-family: monospace;
-    transition: all 0.3s;
+    transition: width 0.3s;
 }
 #codeContainer {
     margin-top:10px;
     display:flex;
     width:80%;
     gap:10px;
-    transition: all 0.3s;
+    transition: width 0.3s;
 }
 textarea { flex:1; height:80px; background:#222; color:white; border:none; padding:10px; font-family:monospace; }
 #sidebar {
     position:fixed;
-    top:0;
-    right:-350px;
+    top:50px;
+    right:0;
     width:350px;
-    height:100%;
+    height:calc(100% - 50px);
     background:#1b1b1b;
     padding:20px;
-    transition: right 0.3s;
     overflow-y:auto;
+    transform: translateX(100%);
+    transition: transform 0.3s;
     z-index:100;
+    display:flex;
+    flex-direction: column;
 }
-#sidebar.active { right:0; }
-.command { cursor:pointer; padding:6px 0; display:inline-block; margin:4px; background:#333; border-radius:4px; }
-.command:hover { color:#00ffcc; }
-.example-btn { margin-top:5px; padding:6px 10px; background:#444; border-radius:4px; cursor:pointer; }
-.example-btn:hover { background:#666; }
-.container { display:flex; flex-direction:column; align-items:center; margin-top:40px; }
+#sidebar.active { transform: translateX(0); }
+.command {
+    display:block;
+    padding:8px 12px;
+    margin-bottom:6px;
+    background:#333;
+    border-radius:4px;
+    text-align:center;
+    cursor:pointer;
+}
+.command:hover { background:#00ffcc; color:#111; }
+.example { background:#222; padding:6px; margin-top:6px; display:block; }
+.container { display:flex; flex-direction:column; align-items:center; margin-top:40px; transition: width 0.3s; }
 </style>
 </head>
 <body>
@@ -67,7 +76,7 @@ textarea { flex:1; height:80px; background:#222; color:white; border:none; paddi
     </div>
 </div>
 
-<div class="container">
+<div class="container" id="mainContainer">
     <div id="output"></div>
     <div id="codeContainer">
         <textarea id="codeInput" placeholder="Enter Lisp code..."></textarea>
@@ -83,10 +92,9 @@ const username = localStorage.getItem("username");
 
 const usernameDisplay = document.getElementById("usernameDisplay");
 const authButton = document.getElementById("authButton");
-const body = document.body;
-const navbar = document.querySelector(".navbar");
 const outputDiv = document.getElementById("output");
 const codeContainer = document.getElementById("codeContainer");
+const mainContainer = document.getElementById("mainContainer");
 
 if (token) {
     usernameDisplay.textContent = username;
@@ -104,7 +112,7 @@ function logout() {
     location.reload();
 }
 
-async function runCode() {
+async function runCode(){
     const code = document.getElementById("codeInput").value;
     if(!code.trim()) return;
 
@@ -112,20 +120,49 @@ async function runCode() {
         method:"POST",
         headers:{
             "Content-Type":"application/json",
-            "Authorization": token ? "Bearer " + token : ""
+            "Authorization": token ? "Bearer "+token : ""
         },
-        body: JSON.stringify({ expr: code })
+        body: JSON.stringify({expr: code})
     });
 
     const data = await res.json();
     const out = data.result || data.error || "";
 
     const lines = code.split("\n");
-    const codeBlock = lines.map(l => `<div style="display:flex; justify-content:space-between;">
-        <span>${l}</span>
-        <button class="example-btn" onclick="insertExample('${l.replace(/'/g,"\\'")}')">Insert</button>
-    </div>`).join("");
-    outputDiv.innerHTML += codeBlock + `<div>${out}</div><hr>`;
+    const codeBlock = document.createElement("div");
+    codeBlock.style.marginBottom = "4px";
+    codeBlock.style.background = "#333";
+    codeBlock.style.padding = "4px";
+    codeBlock.style.borderRadius = "4px";
+    codeBlock.style.display = "flex";
+    codeBlock.style.justifyContent = "space-between";
+    codeBlock.style.alignItems = "flex-start";
+
+    const codeText = document.createElement("div");
+    codeText.style.flex = "1";
+    codeText.innerHTML = lines.map(l => `<div>${l}</div>`).join("");
+
+    const insertBtn = document.createElement("button");
+    insertBtn.textContent = "Insert";
+    insertBtn.style.marginLeft = "10px";
+    insertBtn.style.height = "fit-content";
+    insertBtn.onclick = () => {
+        const input = document.getElementById("codeInput");
+        if(input.value.trim() === "") input.value = codeText.innerText;
+        else input.value += "\n" + codeText.innerText;
+    };
+
+    codeBlock.appendChild(codeText);
+    codeBlock.appendChild(insertBtn);
+
+    outputDiv.appendChild(codeBlock);
+
+    const resultDiv = document.createElement("div");
+    resultDiv.textContent = out;
+    outputDiv.appendChild(resultDiv);
+
+    outputDiv.appendChild(document.createElement("hr"));
+
     document.getElementById("codeInput").value = "";
 }
 
@@ -146,12 +183,12 @@ document.getElementById("codeInput").addEventListener("keydown", function(e){
 const commands = {
     "+": {syntax:"(+ a b ...)", description:"Adds all arguments.", example:"(+ 1.2 2.3 3.4)"},
     "-": {syntax:"(- a b)", description:"Subtracts second from first.", example:"(- 10.5 3.2)"},
-    "*": {syntax:"(* a b ...)", description:"Multiplies arguments.", example:"(* 2.1 3.3 4.4)"},
+    "*": {syntax:"(* a b ...)", description:"Multiplies arguments.", example:"(* 2.1 3.5 4.0)"},
     "/": {syntax:"(/ a b)", description:"Divides first by second.", example:"(/ 8.2 2.1)"},
-    "head": {syntax:"(head list)", description:"Returns first element of list.", example:"(head '(1.2 2.3 3.4))"},
-    "tail": {syntax:"(tail list)", description:"Returns list without first element.", example:"(tail '(1.2 2.3 3.4))"},
+    "head": {syntax:"(head list)", description:"Returns first element of list.", example:"(head '(1.1 2.2 3.3))"},
+    "tail": {syntax:"(tail list)", description:"Returns list without first element.", example:"(tail '(1.1 2.2 3.3))"},
     "<": {syntax:"(< a b)", description:"Checks if a < b.", example:"(< 5.5 10.2)"},
-    ">": {syntax: "(> a b)", description:"Checks if a > b.", example: "(> 5.5 10.2)"},
+    ">": {syntax: "(> a b)", description:"Checks if a > b.", example: "(> 5.3 10.4)"},
     "=": {syntax:"(= a b)", description:"Checks equality.", example:"(= 5.5 5.5)"}
 };
 
@@ -159,15 +196,9 @@ function toggleSidebar(){
     const sidebar = document.getElementById("sidebar");
     sidebar.classList.toggle("active");
     if(sidebar.classList.contains("active")){
-        body.style.width = "calc(100% - 350px)";
-        navbar.style.width = "calc(100% - 350px)";
-        outputDiv.style.width = "calc(80% - 350px)";
-        codeContainer.style.width = "calc(80% - 350px)";
+        mainContainer.style.width = "calc(80% - 350px)";
     } else {
-        body.style.width = "100%";
-        navbar.style.width = "100%";
-        outputDiv.style.width = "80%";
-        codeContainer.style.width = "80%";
+        mainContainer.style.width = "80%";
     }
     renderCommandList();
 }
@@ -189,12 +220,14 @@ function showCommand(cmd){
         <p><b>Syntax:</b> ${c.syntax}</p>
         <p>${c.description}</p>
         <p><b>Example:</b> ${c.example}</p>
-        <button class="example-btn" onclick="insertExample('${c.example.replace(/'/g,"\\'")}')">Insert</button>
+        <button onclick="insertExample('${c.example.replace(/'/g,"\\'")}')">Insert</button>
     `;
 }
 
 function insertExample(text){
-    document.getElementById("codeInput").value = text;
+    const input = document.getElementById("codeInput");
+    if(input.value.trim() === "") input.value = text;
+    else input.value += "\n" + text;
 }
 </script>
 
