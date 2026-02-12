@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Login</title>
+<style>
+body { background:#111; color:white; font-family:Arial; display:flex; justify-content:center; align-items:center; height:100vh; }
+.container { display:flex; flex-direction:column; width:300px; gap:10px; }
+input, button { padding:8px; border:none; }
+button { background:#333; color:white; cursor:pointer; }
+a { color:#00ffcc; text-align:center; }
+</style>
+</head>
+<body>
+
+<div class="container">
+<h2>Login</h2>
+<input id="username" placeholder="Username">
+<input id="password" type="password" placeholder="Password">
+<button onclick="login()">Login</button>
+<a href="registration.html">Don't have an account? Register</a>
+<div id="error"></div>
+</div>
+
+<script>
+async function login(){
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+
+    const res = await fetch("/login",{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ username, password })
+    });
+
+    const data = await res.json();
+
+    if(res.ok){
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("username", data.username);
+        window.location.href="index.html";
+    } else {
+        document.getElementById("error").innerText = data.error;
+    }
+}
+</script>
+
+</body>
+</html>
