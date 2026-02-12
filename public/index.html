@@ -7,10 +7,20 @@
 body { margin:0; font-family: Arial; background:#111; color:white; }
 .navbar {
     display:flex;
-    justify-content:flex-end;
+    justify-content:space-between;
     align-items:center;
     padding:10px 20px;
     background:#1c1c1c;
+    gap:15px;
+}
+.nav-left {
+    display:flex;
+    align-items:center;
+    gap:15px;
+}
+.nav-right {
+    display:flex;
+    align-items:center;
     gap:15px;
 }
 button {
@@ -21,21 +31,28 @@ button {
     cursor:pointer;
 }
 button:hover { background:#555; }
-textarea {
-    width:80%;
-    height:120px;
-    background:#222;
-    color:white;
-    border:none;
-    padding:10px;
-    font-family:monospace;
-}
 #output {
     margin-top:20px;
     background:#222;
     padding:10px;
     width:80%;
-    min-height:60px;
+    min-height:120px;
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+#codeContainer {
+    margin-top:10px;
+    display:flex;
+    width:80%;
+}
+textarea {
+    flex:1;
+    height:80px;
+    background:#222;
+    color:white;
+    border:none;
+    padding:10px;
+    font-family:monospace;
 }
 #sidebar {
     position:fixed;
@@ -68,15 +85,22 @@ textarea {
 <body>
 
 <div class="navbar">
-    <span id="usernameDisplay"></span>
-    <button onclick="toggleSidebar()">Info</button>
-    <button id="authButton"></button>
+    <div class="nav-left">
+        <span style="font-weight:bold; font-size:18px;">Gosp</span>
+        <span id="usernameDisplay"></span>
+    </div>
+    <div class="nav-right">
+        <button onclick="toggleSidebar()">Info</button>
+        <button id="authButton"></button>
+    </div>
 </div>
 
 <div class="container">
-    <textarea id="codeInput" placeholder="Enter Lisp code..."></textarea>
-    <button onclick="runCode()">Run</button>
     <div id="output"></div>
+    <div id="codeContainer">
+        <textarea id="codeInput" placeholder="Enter Lisp code..."></textarea>
+        <button onclick="runCode()">Run</button>
+    </div>
 </div>
 
 <div id="sidebar"></div>
@@ -103,72 +127,58 @@ function logout() {
     location.reload();
 }
 
-const codeInput = document.getElementById("codeInput");
-const output = document.getElementById("output");
-const historyDiv = document.getElementById("output"); // используем тот же блок для истории
-
-function appendHistory(expr, res) {
-    const div = document.createElement("div");
-    div.innerHTML = `<pre>${expr}</pre><pre>${res}</pre>`;
-    historyDiv.appendChild(div);
-    historyDiv.scrollTop = historyDiv.scrollHeight;
-}
-
 async function runCode() {
-    const code = codeInput.value;
-    if (!code.trim()) return; // не выполняем если пусто
+    const code = document.getElementById("codeInput").value;
+    if(!code.trim()) return; // игнор пустых строк
 
-    const lines = code.split("\n").filter(line => line.trim() !== "");
+    const res = await fetch("/api/expr", {
+        method:"POST",
+        headers:{
+            "Content-Type":"application/json",
+            "Authorization": token ? "Bearer " + token : ""
+        },
+        body: JSON.stringify({ expr: code })
+    });
 
-    for (const line of lines) {
-        try {
-            const resp = await fetch("/api/expr", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": token ? "Bearer " + token : ""
-                },
-                body: JSON.stringify({ expr: line })
-            });
-            const data = await resp.json();
-            if (resp.ok) {
-                appendHistory(line, data.result);
-            } else {
-                appendHistory(line, `Error: ${data.error || JSON.stringify(data)}`);
-            }
-        } catch (err) {
-            appendHistory(line, `Network error: ${err.message}`);
-        }
-    }
-
-    codeInput.value = ""; // очищаем поле после выполнения
+    const data = await res.json();
+    const out = data.result || data.error || "";
+    const outputDiv = document.getElementById("output");
+    outputDiv.textContent += out + "\n";
+    document.getElementById("codeInput").value = "";
 }
 
-// ENTER / SHIFT+ENTER
-codeInput.addEventListener("keydown", function(e){
-    if (e.key === "Enter") {
-        if (e.shiftKey) {
-            // вставка новой строки
-            const start = codeInput.selectionStart;
-            const end = codeInput.selectionEnd;
-            codeInput.value = codeInput.value.substring(0, start) + "\n" + codeInput.value.substring(end);
-            codeInput.selectionStart = codeInput.selectionEnd = start + 1;
-            e.preventDefault();
-        } else {
-            // обычный ENTER → выполняем код
-            e.preventDefault();
-            runCode();
-        }
+document.getElementById("codeInput").addEventListener("keydown", function(e){
+    if(e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        runCode();
+    } else if(e.key === "Enter" && e.shiftKey){
+        // добавляем новую строку
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        const value = this.value;
+        this.value = value.slice(0,start) + "\n" + value.slice(end);
+        this.selectionStart = this.selectionEnd = start+1;
+        e.preventDefault();
     }
 });
 
-document.getElementById("runBtn").addEventListener("click", runCode);
-
-// Commands sidebar
+// Sidebar commands
 const commands = {
-    car: { syntax:"(car list)", description:"Returns first element of list.", example:"(car '(1 2 3))" },
-    cdr: { syntax:"(cdr list)", description:"Returns list without first element.", example:"(cdr '(1 2 3))" },
-    define: { syntax:"(define x 10)", description:"Defines a variable.", example:"(define x 5)" }
+    car: {
+        syntax:"(car list)",
+        description:"Returns first element of list.",
+        example:"(car '(1 2 3))"
+    },
+    cdr: {
+        syntax:"(cdr list)",
+        description:"Returns list without first element.",
+        example:"(cdr '(1 2 3))"
+    },
+    define: {
+        syntax:"(define x 10)",
+        description:"Defines a variable.",
+        example:"(define x 5)"
+    }
 };
 
 function toggleSidebar(){
@@ -198,8 +208,7 @@ function showCommand(cmd){
 }
 
 function insertExample(text){
-    codeInput.value = text;
-    codeInput.focus();
+    document.getElementById("codeInput").value = text;
 }
 </script>
 
