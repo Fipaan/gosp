@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Register - Gosp</title>
+<style>
+body { font-family: Arial; background:#111; color:white; display:flex; justify-content:center; align-items:center; height:100vh; }
+form { display:flex; flex-direction:column; gap:10px; background:#222; padding:20px; border-radius:6px; width:300px; }
+input { padding:8px; border:none; border-radius:4px; background:#333; color:white; }
+button { padding:8px; border:none; border-radius:4px; background:#00ffcc; color:#111; cursor:pointer; }
+button:hover { background:#0aa; }
+#error { color:#ff4444; }
+#bottomText { font-size:14px; text-align:center; margin-top:8px; }
+#bottomText a { color:#0aa; text-decoration:none; }
+#bottomText a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<form id="regForm">
+    <h2>Register</h2>
+    <input type="text" id="username" placeholder="Username" required>
+    <input type="password" id="password" placeholder="Password" required>
+    <button type="submit">Register</button>
+    <div id="error"></div>
+    <div id="bottomText">
+        Already have an account? <a href="login.html">Login</a>
+    </div>
+</form>
+
+<script>
+const form = document.getElementById("regForm");
+const errorDiv = document.getElementById("error");
+
+form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorDiv.textContent = "";
+
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value.trim();
+
+    if (!username || !password) {
+        errorDiv.textContent = "Username and password are required";
+        return;
+    }
+
+    try {
+        let res = await fetch("/api/register", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({username, password})
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            errorDiv.textContent = err.message || "Registration failed";
+            return;
+        }
+
+        res = await fetch("/api/login", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({username, password})
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            errorDiv.textContent = err.message || "Login failed";
+            return;
+        }
+
+        const token = res.headers.get("X-Auth-Key");
+        if (!token) {
+            errorDiv.textContent = "Login succeeded but token missing";
+            return;
+        }
+
+        localStorage.setItem("token", token);
+        localStorage.setItem("username", username);
+
+        window.location.href = "index.html";
+
+    } catch(err) {
+        console.error(err);
+        errorDiv.textContent = "Network error";
+    }
+});
+</script>
+
+</body>
+</html>
