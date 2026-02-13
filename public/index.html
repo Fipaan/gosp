@@ -186,21 +186,18 @@ async function runCode(){
     try { data = await res.json(); } 
     catch(e) { data = { result: null, error: "Invalid server response" }; }
     let outputs = [];
-    if (data.result) {
-        if (Array.isArray(data.result)) outputs.push(...data.result);
-        else outputs.push(data.result);
-    }
-    if (data.error) {
-        if (Array.isArray(data.error)) outputs.push(...data.error.map(e => "Error: " + e));
-        else outputs.push("Error: " + data.error);
-    }
+    if (data.result) outputs.push(data.result);
+    if (data.message) outputs.push(data.message);
     const codeBlock = document.createElement("div");
     codeBlock.className = "output-block";
     codeBlock.innerHTML = code.split("\n").map(l => `<div>${l}</div>`).join("");
     const insBtn = document.createElement("button");
     insBtn.className = "output-insert";
     insBtn.textContent = "Insert";
-    insBtn.onclick = () => { codeInput.value += (codeInput.value ? "\n" : "") + code; codeInput.focus(); };
+    insBtn.onclick = () => {
+        codeInput.value += (codeInput.value ? "\n" : "") + code;
+        codeInput.focus();
+    };
     codeBlock.appendChild(insBtn);
     outputDiv.appendChild(codeBlock);
     outputs.forEach(out => {
